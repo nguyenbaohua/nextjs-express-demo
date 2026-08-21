@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Todo List — Frontend
 
-## Getting Started
+Giao diện web cho API todo ở [`../backend`](../backend), viết bằng Next.js 16 (App Router) + TypeScript + CSS Modules.
 
-First, run the development server:
+## Yêu cầu
+
+Backend phải chạy trước, vì mọi dữ liệu đều lấy từ đó. Xem hướng dẫn ở `../backend`.
+
+## Chạy dự án
 
 ```bash
+cp .env.example .env.local   # chỉnh lại nếu backend không chạy ở cổng 3000
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Mở http://localhost:3001
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> Frontend dùng cổng **3001** vì backend đã giữ cổng 3000.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Biến môi trường
 
-## Learn More
+| Biến | Mặc định | Mô tả |
+| --- | --- | --- |
+| `API_BASE_URL` | `http://localhost:3000/api` | Base URL của backend. Chỉ đọc ở phía server nên không lộ ra browser. |
 
-To learn more about Next.js, take a look at the following resources:
+## Các trang
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Đường dẫn | Chức năng |
+| --- | --- |
+| `/` | Danh sách task, tách nhóm chưa xong / đã xong. Thêm task, tick hoàn thành, xóa. |
+| `/todos/[id]` | Chi tiết task: sửa nội dung, đổi trạng thái, xóa, xem ngày tạo / cập nhật. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Cấu trúc
 
-## Deploy on Vercel
+```
+src/
+├── app/
+│   ├── layout.tsx           Root layout, font, metadata
+│   ├── globals.css          Design token (sáng / tối) + reset
+│   ├── page.tsx             Trang danh sách
+│   └── todos/[id]/          Trang chi tiết + not-found
+├── components/              Component UI, mỗi cái kèm *.module.css
+└── lib/
+    ├── api.ts               Gọi backend (server-side), bóc envelope { success, data }
+    ├── actions.ts           Server Actions + revalidatePath
+    ├── types.ts             Kiểu dữ liệu khớp với backend
+    ├── constants.ts         Route helper, giá trị mặc định
+    └── format.ts            Format ngày giờ vi-VN
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Luồng dữ liệu
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```mermaid
+flowchart LR
+    P["Server Component<br/>(page.tsx)"] -->|"đọc"| A["lib/api.ts"]
+    C["Client Component<br/>(form, nút bấm)"] -->|"gọi"| S["lib/actions.ts<br/>Server Action"]
+    S -->|"ghi"| A
+    A -->|"fetch no-store"| B["Backend Express<br/>/api/todos"]
+    B --> DB[("PostgreSQL")]
+    S -.->|"revalidatePath"| P
+```
+
+Mọi request đều dùng `cache: "no-store"` để luôn lấy dữ liệu mới nhất; sau mỗi lần ghi, Server Action gọi `revalidatePath` để render lại trang liên quan.
+
+## Lệnh
+
+| Lệnh | Tác dụng |
+| --- | --- |
+| `npm run dev` | Chạy dev server ở cổng 3001 |
+| `npm run build` | Build production |
+| `npm start` | Chạy bản build ở cổng 3001 |
+| `npm run lint` | ESLint |
