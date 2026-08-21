@@ -11,6 +11,16 @@ export async function getAllTodos(req: Request, res: Response, next: NextFunctio
   }
 }
 
+export async function getTodoById(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = todoIdParamSchema.parse(req.params);
+    const todo = await todoService.getTodoById(id);
+    res.json({ success: true, data: todo });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function createTodo(req: Request, res: Response, next: NextFunction) {
   try {
     const { content } = createTodoSchema.parse(req.body);

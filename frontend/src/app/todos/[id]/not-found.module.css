@@ -1,0 +1,28 @@
+.page {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 96px 20px;
+  text-align: center;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.message {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.link {
+  display: inline-block;
+  margin-top: 24px;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

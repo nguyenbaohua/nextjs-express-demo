@@ -12,6 +12,16 @@ export async function getAllTodos() {
   return prisma.todo.findMany({ orderBy: { createdAt: "desc" } });
 }
 
+export async function getTodoById(id: number) {
+  const todo = await prisma.todo.findUnique({ where: { id } });
+
+  if (!todo) {
+    throw notFoundError(id);
+  }
+
+  return todo;
+}
+
 export async function createTodo(content: string) {
   return prisma.todo.create({ data: { content } });
 }

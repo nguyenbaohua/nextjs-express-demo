@@ -1,0 +1,12 @@
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: 13px;
+}
