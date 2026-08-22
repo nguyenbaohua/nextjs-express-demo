@@ -1,16 +1,166 @@
+/*
+ * ============================================================================
+ * SCHEMA PRISMA — bản thiết kế của cơ sở dữ liệu
+ * ============================================================================
+ *
+ * File này là NGUỒN SỰ THẬT DUY NHẤT về cấu trúc database. Nó không phải code
+ * TypeScript mà là ngôn ngữ riêng của Prisma (dễ đọc, chỉ vài từ khoá), và từ
+ * nó Prisma sinh ra HAI thứ:
+ *
+ *   1. CÂU LỆNH SQL để tạo/sửa bảng thật trong Postgres  → thư mục prisma/migrations/
+ *   2. CODE TYPESCRIPT có đầy đủ kiểu dữ liệu            → node_modules/@prisma/client
+ *
+ * ----------------------------------------------------------------------------
+ * HAI LỆNH BẠN SẼ DÙNG SUỐT — PHÂN BIỆT CHO RÕ
+ * ----------------------------------------------------------------------------
+ *
+ *   npm run prisma:generate   (prisma generate)
+ *     Chỉ sinh lại CODE TypeScript. KHÔNG đụng vào database.
+ *     Chạy khi: vừa `git clone` về, vừa `npm install`, hoặc chỉ sửa những thứ
+ *     không ảnh hưởng cấu trúc bảng.
+ *
+ *   npm run prisma:migrate    (prisma migrate dev)
+ *     So sánh file này với database thật, sinh ra file .sql ghi lại sự khác
+ *     biệt, CHẠY file đó lên database, RỒI tự động generate luôn.
+ *     Chạy khi: vừa thêm/xoá/sửa `model` hay trường trong file này.
+ *
+ *   npm run prisma:studio     (prisma studio)
+ *     Mở giao diện web xem/sửa dữ liệu trực tiếp — rất tiện khi học và gỡ lỗi.
+ *
+ * Vấn đề số một của người mới: sửa file này rồi quên chạy migrate. Khi đó code
+ * TypeScript nói một đằng, bảng trong database một nẻo, và lỗi hiện ra rất khó
+ * hiểu. Hễ sửa file này, phản xạ đầu tiên là chạy `npm run prisma:migrate`.
+ *
+ * ----------------------------------------------------------------------------
+ * MIGRATION LÀ GÌ VÀ VÌ SAO PHẢI COMMIT LÊN GIT?
+ * ----------------------------------------------------------------------------
+ * Mỗi migration là một file SQL được đánh dấu thời gian, mô tả MỘT bước thay
+ * đổi cấu trúc. Chúng xếp thành lịch sử tuần tự, y như commit của git nhưng
+ * dành cho database.
+ *
+ * Nhờ đó đồng đội mới vào chỉ cần chạy `prisma migrate deploy` là dựng được
+ * database giống hệt bạn, và khi lên production bạn biết chính xác câu SQL nào
+ * sẽ chạy. Vì vậy thư mục `prisma/migrations/` PHẢI được commit lên git.
+ */
+
+/*
+ * ----------------------------------------------------------------------------
+ * GENERATOR — sinh ra cái gì?
+ * ----------------------------------------------------------------------------
+ * `prisma-client-js` là bộ sinh code chuẩn: nó tạo ra đối tượng `PrismaClient`
+ * mà bạn dùng trong `src/lib/prisma.ts`. Chính khối này là lý do gõ
+ * `prisma.todo.` trong editor thì hiện ra gợi ý `findMany`, `create`, `update`...
+ */
 generator client {
-  provider      = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
+/*
+ * ----------------------------------------------------------------------------
+ * DATASOURCE — kết nối tới database nào?
+ * ----------------------------------------------------------------------------
+ * `provider = "postgresql"` cho Prisma biết phương ngữ SQL cần dùng (mỗi hệ
+ * quản trị có cú pháp hơi khác nhau: postgresql, mysql, sqlite, sqlserver...).
+ *
+ * `env("DATABASE_URL")` đọc biến môi trường thay vì ghi thẳng chuỗi kết nối vào
+ * đây. Bắt buộc phải làm vậy, vì chuỗi đó chứa MẬT KHẨU — mà file này thì được
+ * commit lên git. Giá trị thật nằm trong `.env` (đã bị .gitignore chặn), còn
+ * `.env.example` chỉ giữ bản mẫu với giá trị giả.
+ *
+ * Nếu bạn chưa có Postgres: chạy `docker compose up -d` trong thư mục backend,
+ * file `docker-compose.yml` sẽ dựng sẵn một container Postgres cho bạn.
+ */
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+/*
+ * ----------------------------------------------------------------------------
+ * MODEL — mỗi model tương ứng MỘT BẢNG trong database
+ * ----------------------------------------------------------------------------
+ * `model Todo` sẽ tạo bảng tên `"Todo"` trong Postgres, và đồng thời sinh ra
+ * `prisma.todo` (viết thường) trong code TypeScript.
+ *
+ * Cú pháp mỗi dòng gồm ba phần:
+ *
+ *     createdAt      DateTime      @default(now())
+ *     └───┬────┘     └───┬───┘     └──────┬──────┘
+ *     TÊN TRƯỜNG      KIỂU DỮ LIỆU    THUỘC TÍNH (bắt đầu bằng @)
+ *
+ * Dấu `?` sau kiểu (ví dụ `String?`) nghĩa là trường được phép rỗng (NULL).
+ * Ở đây không trường nào có `?`, tức là mọi trường đều BẮT BUỘC có giá trị.
+ */
 model Todo {
-  id        Int      @id @default(autoincrement())
-  content   String
-  isDone    Boolean  @default(false)
+  /*
+   * Khoá chính.
+   *   @id                       → đây là khoá chính, dùng để nhận diện duy nhất
+   *                               một dòng. Prisma bắt buộc mỗi model có một cái.
+   *   @default(autoincrement()) → không cần tự cấp số; Postgres tự đếm 1, 2, 3...
+   *                              (trong SQL sinh ra, nó thành kiểu SERIAL).
+   *
+   * Vì id là số nguyên dương tăng dần nên trong `schemas/todo.schema.ts` ta
+   * validate `z.coerce.number().int().positive()` — khớp chính xác với thực tế
+   * dữ liệu ở đây.
+   */
+  id Int @id @default(autoincrement())
+
+  /*
+   * Nội dung công việc. Không có `?` nên bắt buộc phải có, không có `@default`
+   * nên khi tạo mới BẮT BUỘC phải truyền vào — đúng như `createTodo(content)`
+   * trong tầng service.
+   *
+   * `String` của Prisma ánh xạ sang kiểu `TEXT` của Postgres: độ dài không giới
+   * hạn thực tế. Muốn giới hạn thì thêm `@db.VarChar(255)`, nhưng với todo thì
+   * để tự do lại hợp lý hơn — và luật "không được rỗng" đã có zod lo ở tầng trên.
+   */
+  content String
+
+  /*
+   * Trạng thái hoàn thành.
+   * `@default(false)` khiến todo mới luôn ở trạng thái chưa xong, nên tầng
+   * service không cần truyền trường này lúc `create`.
+   */
+  isDone Boolean @default(false)
+
+  /*
+   * Thời điểm tạo.
+   * `@default(now())` → database tự điền thời gian hiện tại lúc chèn dòng mới.
+   * Trường này được dùng để sắp xếp danh sách (`orderBy: { createdAt: "desc" }`)
+   * nên todo mới nhất luôn nằm trên đầu.
+   */
   createdAt DateTime @default(now())
+
+  /*
+   * Thời điểm sửa gần nhất.
+   * `@updatedAt` là thuộc tính đặc biệt: PRISMA (không phải database) tự động
+   * ghi lại thời gian hiện tại mỗi lần bạn gọi `update`. Nhờ vậy không lập
+   * trình viên nào phải nhớ set nó bằng tay — và cũng không ai quên được.
+   *
+   * Hệ quả cần biết: vì việc này do Prisma làm, nếu bạn sửa dữ liệu bằng câu SQL
+   * trực tiếp (không qua Prisma) thì `updatedAt` sẽ KHÔNG được cập nhật.
+   */
   updatedAt DateTime @updatedAt
 }
+
+/*
+ * ----------------------------------------------------------------------------
+ * KHI MUỐN MỞ RỘNG — hình dung trước cho dễ hình dung
+ * ----------------------------------------------------------------------------
+ * Ví dụ muốn mỗi todo thuộc về một người dùng, bạn sẽ viết thêm:
+ *
+ *     model User {
+ *       id    Int    @id @default(autoincrement())
+ *       email String @unique          // @unique: không hai người trùng email
+ *       todos Todo[]                  // một người có NHIỀU todo
+ *     }
+ *
+ * và thêm vào model Todo hai dòng:
+ *
+ *     userId Int
+ *     user   User @relation(fields: [userId], references: [id])
+ *
+ * Prisma sẽ tự tạo khoá ngoại trong database, và trong code bạn có thể lấy kèm
+ * dữ liệu liên quan chỉ bằng `prisma.todo.findMany({ include: { user: true } })`
+ * — không phải viết câu JOIN nào cả. Đó là lúc sức mạnh của ORM lộ rõ nhất.
+ */
