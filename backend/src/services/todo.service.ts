@@ -48,19 +48,8 @@
  * biến nhất của người mới dùng Prisma.
  */
 
-import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../utils/AppError";
-
-/*
- * Prisma đặt tên mã lỗi theo kiểu "P" + số. `P2025` nghĩa là:
- * "An operation failed because it depends on one or more records that were
- * required but not found" — tức là bạn bảo nó sửa/xoá một bản ghi không tồn tại.
- *
- * Tách thành hằng số đặt tên rõ ràng thay vì rải chuỗi `"P2025"` khắp file: đọc
- * code hiểu ngay ý nghĩa, và gõ sai thì TypeScript bắt được.
- */
-const PRISMA_NOT_FOUND = "P2025";
 
 /*
  * Hàm nhỏ gom việc tạo lỗi 404 về một chỗ, để câu thông báo luôn giống nhau ở
@@ -74,46 +63,82 @@ function notFoundError(id: number) {
   return new AppError(404, `Không tìm thấy todo với id ${id}`);
 }
 
-/**
- * Lấy toàn bộ todo.
+/*
+ * ============================================================================
+ * ⚠️ QUY TẮC SỐ MỘT CỦA FILE NÀY, KỂ TỪ KHI CÓ ĐĂNG NHẬP
+ * ============================================================================
  *
- * `findMany` = câu `SELECT * FROM "Todo"`. Không truyền `where` nghĩa là lấy hết.
+ * MỌI hàm bên dưới đều nhận tham số `userId`, và MỌI câu query đều phải có
+ * `userId` trong mệnh đề `where`. Không có ngoại lệ.
+ *
+ * `userId` này là `sub` do middleware `requireAuth` đọc ra TỪ CHỮ KÝ của token
+ * Cognito. Client không tự khai được nó.
+ *
+ * Vì sao phải nhấn mạnh đến thế? Vì đây chính xác là chỗ mà lỗ hổng bảo mật phổ
+ * biến nhất thế giới web sinh ra. Nó có tên riêng: IDOR — *Insecure Direct
+ * Object Reference*.
+ *
+ * Kịch bản: An đăng nhập, thấy todo id 5 của mình. An mở DevTools và sửa request
+ * thành id 6 — todo của Bình. Nếu câu query chỉ có `where: { id: 6 }` thì server
+ * vui vẻ trả về todo của Bình. An không cần kỹ thuật gì cao siêu, chỉ cần đổi
+ * một con số.
+ *
+ * Cách chặn duy nhất là câu query PHẢI hỏi cả hai điều cùng lúc:
+ *     "todo id 6, VÀ thuộc về đúng người đang gọi"
+ * Không thoả cả hai thì coi như không tồn tại.
+ *
+ * Chú ý cách ta trả lời khi An hỏi todo của Bình: 404 "không tìm thấy", KHÔNG
+ * phải 403 "cấm truy cập". Đây là chủ ý. Trả 403 là vô tình xác nhận "todo id 6
+ * CÓ tồn tại, chỉ là không phải của bạn" — một mẩu thông tin nhỏ nhưng đủ để
+ * người ta dò ra hệ thống có bao nhiêu bản ghi. Với người dùng, thứ không thuộc
+ * về họ thì đơn giản là không tồn tại.
+ */
+
+/**
+ * Lấy toàn bộ todo CỦA MỘT NGƯỜI DÙNG.
+ *
+ * `where: { userId }` = `WHERE "userId" = $1`. Đây là dòng biến ứng dụng dùng
+ * chung thành ứng dụng riêng tư cho từng người.
+ *
+ * Nhớ lại `@@index([userId])` đã thêm trong `schema.prisma`: nó tồn tại chính là
+ * để phục vụ câu query này, câu chạy nhiều nhất trong cả ứng dụng.
  *
  * `orderBy: { createdAt: "desc" }` = `ORDER BY "createdAt" DESC` — mới nhất lên
  * đầu. Việc sắp xếp được giao cho DATABASE chứ không phải cho JavaScript, vì
- * database có chỉ mục (index) và làm việc này nhanh hơn nhiều; hơn nữa khi dữ
- * liệu lớn tới mức phải phân trang, sắp xếp ở JS sẽ cho kết quả sai hoàn toàn.
+ * database có chỉ mục và làm việc này nhanh hơn nhiều; hơn nữa khi dữ liệu lớn
+ * tới mức phải phân trang, sắp xếp ở JS sẽ cho kết quả sai hoàn toàn.
  *
  * Hàm này không có `try/catch`: nếu database sập thì lỗi cứ để nó lan lên trên,
  * `errorHandler` sẽ ghi log và trả 500. Chỉ nên bắt lỗi khi bạn THỰC SỰ làm được
  * điều gì đó với nó — bắt rồi ném lại y nguyên chỉ làm code rối thêm.
- *
- * Để ý hàm có `async` nhưng bên trong không hề `await`: `prisma.todo.findMany()`
- * vốn đã trả về Promise, ta trả thẳng nó ra ngoài và người gọi `await` giúp.
- * Bỏ chữ `async` đi thì code vẫn chạy y hệt; giữ lại chỉ để bảy hàm trong file
- * trông đồng bộ với nhau và để sau này thêm `await` không phải sửa chữ ký hàm.
  */
-export async function getAllTodos() {
-  return prisma.todo.findMany({ orderBy: { createdAt: "desc" } });
+export async function getAllTodos(userId: string) {
+  return prisma.todo.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 /**
- * Lấy một todo theo id.
+ * Lấy một todo theo id — nhưng chỉ khi nó thuộc về `userId`.
  *
- * `findUnique` chỉ dùng được với cột có tính duy nhất (khoá chính, hoặc cột
- * đánh dấu `@unique`). Nó trả về `Todo` HOẶC `null` — KHÔNG ném lỗi khi không
- * tìm thấy. Đó là lý do phải tự kiểm tra `if (!todo)` bên dưới.
+ * Chú ý ta dùng `findFirst` chứ KHÔNG phải `findUnique` như bản trước khi có
+ * đăng nhập. Đây là một hạn chế thật của Prisma đáng nhớ:
  *
- * (Prisma cũng có `findUniqueOrThrow` tự ném lỗi, nhưng lỗi đó là lỗi của Prisma
- * chứ không phải `AppError` của mình, nên vẫn phải bắt và dịch lại — viết tay
- * như thế này lại rõ ràng hơn.)
+ *   `findUnique` chỉ nhận điều kiện trên các cột DUY NHẤT (khoá chính hoặc cột
+ *   `@unique`). `userId` không duy nhất — một người có nhiều todo — nên nó không
+ *   được phép xuất hiện trong `where` của `findUnique`.
  *
- * Việc ném `AppError(404)` ở đây, thay vì trả `null` về cho controller, giúp mọi
- * controller khỏi phải lặp đi lặp lại đoạn `if (!todo) return res.status(404)...`.
- * Quy ước của dự án: service ném lỗi, controller chỉ lo chuyện thành công.
+ *   `findFirst` nhận điều kiện tuỳ ý và trả về bản ghi khớp đầu tiên (hoặc null).
+ *
+ * Về hiệu năng thì không đáng lo: `id` vẫn là khoá chính nên Postgres tìm bằng
+ * chỉ mục, chỉ thêm một phép so sánh `userId` trên đúng dòng đó.
+ *
+ * Đây cũng là chỗ chặn IDOR đã nói ở trên: An hỏi todo của Bình thì `findFirst`
+ * trả `null`, và ta ném 404 y như khi todo không tồn tại thật.
  */
-export async function getTodoById(id: number) {
-  const todo = await prisma.todo.findUnique({ where: { id } });
+export async function getTodoById(id: number, userId: string) {
+  const todo = await prisma.todo.findFirst({ where: { id, userId } });
 
   if (!todo) {
     throw notFoundError(id);
@@ -123,105 +148,114 @@ export async function getTodoById(id: number) {
 }
 
 /**
- * Tạo todo mới.
+ * Tạo todo mới cho một người dùng.
  *
- * Chỉ cần đưa `content`. Ba trường còn lại được điền tự động, và điều đó được
- * quy định trong `prisma/schema.prisma`:
+ * Điểm mấu chốt về bảo mật: `userId` KHÔNG đến từ body request. Nó được
+ * controller lấy từ `req.user.sub` — tức là từ token đã ký. Nếu để client tự gửi
+ * `userId` lên, ai cũng có thể tạo todo mang tên người khác.
+ *
+ * Các trường còn lại được điền tự động theo khai báo trong `schema.prisma`:
  *   id        `@default(autoincrement())` → Postgres tự cấp số tăng dần
  *   isDone    `@default(false)`           → mặc định chưa xong
  *   createdAt `@default(now())`           → thời điểm hiện tại
  *   updatedAt `@updatedAt`                → Prisma tự set mỗi lần ghi
- *
- * `create` trả về bản ghi ĐẦY ĐỦ vừa được tạo (kèm `id` thật do database cấp).
- * Nhờ vậy controller gửi thẳng về cho frontend, frontend có ngay id để hiển thị
- * mà không phải gọi thêm một request nữa.
  */
-export async function createTodo(content: string) {
-  return prisma.todo.create({ data: { content } });
+export async function createTodo(content: string, userId: string) {
+  return prisma.todo.create({ data: { content, userId } });
 }
 
-/**
- * Xoá todo.
+/*
+ * ----------------------------------------------------------------------------
+ * VÌ SAO BA HÀM SỬA/XOÁ DƯỚI ĐÂY DÙNG `deleteMany` / `updateMany`?
+ * ----------------------------------------------------------------------------
  *
- * Khác với `findUnique`, hàm `delete` NÉM LỖI khi không tìm thấy bản ghi — lỗi
- * `PrismaClientKnownRequestError` với `code === "P2025"`. Đây là lý do phải có
- * `try/catch` ở đây mà `getAllTodos` thì không cần.
+ * Đây là chi tiết kỹ thuật quan trọng nhất của cả file, đáng đọc kỹ.
  *
- * Đoạn `catch` làm đúng một việc: DỊCH lỗi kỹ thuật của Prisma sang lỗi nghiệp
- * vụ của mình. Cách làm này giữ cho tầng trên hoàn toàn "mù" về Prisma — đổi
- * ORM thì chỉ file này phải sửa.
+ * Prisma bắt `delete` và `update` (số ít) phải có `where` trỏ tới một bản ghi
+ * DUY NHẤT — nghĩa là chỉ được dùng khoá chính hoặc cột `@unique`. Ta không nhét
+ * `userId` vào đó được, y như trường hợp `findUnique` ở trên.
  *
- * Hai chi tiết nhỏ nhưng quan trọng:
+ * Cách làm SAI mà rất nhiều người chọn vì nó trông tự nhiên:
  *
- *   - `err instanceof Prisma.PrismaClientKnownRequestError` phải kiểm tra TRƯỚC
- *     khi đọc `err.code`. Trong TypeScript, biến trong `catch` có kiểu `unknown`
- *     (vì JavaScript cho phép `throw` bất cứ thứ gì, kể cả một con số). Chỉ sau
- *     khi `instanceof` xác nhận, TypeScript mới cho phép truy cập `.code`.
+ *     const todo = await prisma.todo.findFirst({ where: { id, userId } });
+ *     if (!todo) throw notFoundError(id);
+ *     return prisma.todo.delete({ where: { id } });   // ⚠️
  *
- *   - `throw err;` ở cuối rất quan trọng. Nếu lỗi KHÔNG phải "không tìm thấy"
- *     (mất kết nối database, hết bộ nhớ...) thì ta ném lại nguyên vẹn để tầng
- *     trên xử lý. Nuốt lỗi im lặng ở đây sẽ khiến bug ẩn mình rất lâu.
+ * Nó chạy đúng trong hầu hết trường hợp, nhưng có một lỗ hổng tinh vi: giữa hai
+ * câu query đó có một KHOẢNG TRỐNG THỜI GIAN. Trong khoảng đó dữ liệu có thể đã
+ * đổi, và câu `delete` cuối cùng thì xoá theo `id` mà KHÔNG kiểm tra chủ sở hữu
+ * nữa. Loại lỗi này gọi là "race condition" (tranh chấp thời gian) hay TOCTOU —
+ * *Time Of Check to Time Of Use*: kiểm tra một đằng, hành động một nẻo.
  *
- *   - `return await` (thay vì `return` trần) là cố ý: phải `await` NGAY TRONG
- *     khối `try` thì `catch` mới bắt được lỗi. Viết `return prisma.todo.delete(...)`
- *     thì hàm trả Promise ra ngoài rồi mới lỗi — lúc đó `try/catch` này đã kết
- *     thúc, không bắt được gì cả. Đây là cái bẫy rất tinh vi, hãy nhớ kỹ.
+ * Cách làm ĐÚNG là dùng `deleteMany` / `updateMany`. Chúng nhận điều kiện tuỳ ý,
+ * nên `id` và `userId` được kiểm tra NGAY TRONG câu SQL — kiểm tra và hành động
+ * gộp làm một thao tác nguyên tử, không còn khoảng trống nào để chen vào:
+ *
+ *     DELETE FROM "Todo" WHERE id = $1 AND "userId" = $2
+ *
+ * Đánh đổi: `...Many` trả về `{ count: số dòng bị ảnh hưởng }` chứ không trả về
+ * bản ghi. Nên ta phải:
+ *   - `count === 0` → không có dòng nào khớp → ném 404
+ *   - `count === 1` → xong, rồi đọc lại bản ghi nếu cần trả về cho client
+ *
+ * Ba hàm dưới đây theo đúng khuôn đó.
+ *
+ * (Ghi chú thêm: bản trước khi có đăng nhập phải bọc `try/catch` để bắt mã lỗi
+ * "P2025" — lỗi Prisma ném ra khi `update`/`delete` không tìm thấy bản ghi. Nay
+ * `...Many` không ném lỗi đó nữa mà chỉ trả `count: 0`, nên toàn bộ đám
+ * `try/catch` ấy đã được gỡ bỏ. Code vừa ngắn hơn vừa an toàn hơn — một trong
+ * những lần hiếm hoi hai thứ đó đi cùng nhau.)
  */
-export async function deleteTodo(id: number) {
-  try {
-    return await prisma.todo.delete({ where: { id } });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === PRISMA_NOT_FOUND) {
-      throw notFoundError(id);
-    }
-    throw err;
+
+/**
+ * Xoá todo — chỉ khi nó thuộc về `userId`.
+ *
+ * `deleteMany` nghe như xoá nhiều dòng, nhưng vì `id` là khoá chính nên điều kiện
+ * này khớp tối đa MỘT dòng. Ta chọn nó vì cần lọc thêm `userId`, không phải vì
+ * muốn xoá hàng loạt.
+ */
+export async function deleteTodo(id: number, userId: string) {
+  const result = await prisma.todo.deleteMany({ where: { id, userId } });
+
+  if (result.count === 0) {
+    // Không tồn tại, HOẶC tồn tại nhưng của người khác — với người gọi thì như nhau.
+    throw notFoundError(id);
   }
 }
 
 /**
- * Sửa nội dung todo.
+ * Sửa nội dung todo — chỉ khi nó thuộc về `userId`.
  *
- * `update` cần hai phần: `where` (tìm bản ghi nào) và `data` (đổi những gì).
- * Prisma chỉ ghi đè đúng các trường bạn liệt kê trong `data`; `isDone` và
- * `createdAt` giữ nguyên.
+ * Prisma chỉ ghi đè đúng các trường liệt kê trong `data`; `isDone` và `createdAt`
+ * giữ nguyên. Còn `updatedAt` được cập nhật TỰ ĐỘNG nhờ `@updatedAt` trong
+ * schema — bạn không phải nhớ set nó bằng tay ở từng chỗ.
  *
- * `updatedAt` thì được cập nhật TỰ ĐỘNG nhờ `@updatedAt` trong schema — bạn
- * không phải nhớ set nó bằng tay ở từng chỗ.
- *
- * Phần `catch` giống hệt `deleteTodo`, vì `update` cũng ném P2025 khi không tìm
- * thấy bản ghi.
+ * Sau khi `updateMany` xong, ta đọc lại bản ghi để trả về cho frontend. Lần đọc
+ * thêm này an toàn: tới đây đã biết chắc dòng đó tồn tại và thuộc về đúng người.
  */
-export async function updateTodoContent(id: number, content: string) {
-  try {
-    return await prisma.todo.update({ where: { id }, data: { content } });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === PRISMA_NOT_FOUND) {
-      throw notFoundError(id);
-    }
-    throw err;
+export async function updateTodoContent(id: number, content: string, userId: string) {
+  const result = await prisma.todo.updateMany({ where: { id, userId }, data: { content } });
+
+  if (result.count === 0) {
+    throw notFoundError(id);
   }
+
+  return getTodoById(id, userId);
 }
 
 /**
- * Bật/tắt trạng thái hoàn thành.
+ * Đánh dấu xong / chưa xong — chỉ khi todo thuộc về `userId`.
  *
- * Một hàm phục vụ cả hai route `/done` và `/undone` — chỉ khác giá trị tham số
- * `isDone`. Đây là ví dụ nhỏ nhưng điển hình cho việc tách tầng: URL thiết kế
- * thế nào là chuyện của tầng HTTP, còn nghiệp vụ chỉ có duy nhất một thao tác
- * "đặt trạng thái".
- *
- * Lưu ý là hàm NHẬN VÀO giá trị mới chứ không tự đảo (`isDone: !isDone`). Tự đảo
- * sẽ phải đọc bản ghi ra trước rồi mới ghi lại — hai lần chạm database, và nếu
- * hai người bấm cùng lúc thì kết quả cuối cùng khó đoán. Nhận thẳng giá trị mong
- * muốn là cách vừa nhanh vừa an toàn hơn.
+ * Một hàm dùng chung cho cả hai chiều thay vì viết `markDone` và `markUndone`
+ * riêng: hai việc đó khác nhau đúng một giá trị boolean, tách ra chỉ tạo thêm
+ * code lặp.
  */
-export async function setTodoDone(id: number, isDone: boolean) {
-  try {
-    return await prisma.todo.update({ where: { id }, data: { isDone } });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === PRISMA_NOT_FOUND) {
-      throw notFoundError(id);
-    }
-    throw err;
+export async function setTodoDone(id: number, isDone: boolean, userId: string) {
+  const result = await prisma.todo.updateMany({ where: { id, userId }, data: { isDone } });
+
+  if (result.count === 0) {
+    throw notFoundError(id);
   }
+
+  return getTodoById(id, userId);
 }

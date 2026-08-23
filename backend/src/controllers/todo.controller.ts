@@ -78,6 +78,36 @@
 import { NextFunction, Request, Response } from "express";
 import * as todoService from "../services/todo.service";
 import { createTodoSchema, todoIdParamSchema, updateTodoContentSchema } from "../schemas/todo.schema";
+import { AppError } from "../utils/AppError";
+
+/*
+ * ----------------------------------------------------------------------------
+ * LẤY DANH TÍNH NGƯỜI GỌI RA KHỎI REQUEST
+ * ----------------------------------------------------------------------------
+ *
+ * `req.user` do middleware `requireAuth` gắn vào, và giá trị của nó được đọc ra
+ * từ CHỮ KÝ của access token Cognito. Đây là điểm khác biệt sống còn so với việc
+ * đọc `req.body.userId`: client không thể tự bịa ra giá trị này.
+ *
+ * Vì sao phải viết hàm riêng thay vì dùng thẳng `req.user!.sub` ở bảy chỗ?
+ *
+ *   Vì dấu `!` là lời hứa với TypeScript rằng "chỗ này chắc chắn có giá trị", và
+ *   lời hứa đó chỉ đúng CHỪNG NÀO route còn nằm sau `requireAuth`. Rải bảy dấu
+ *   `!` khắp file nghĩa là bảy lời hứa phải tự nhớ giữ. Nếu mai này ai đó gỡ
+ *   `requireAuth` khỏi một route, chương trình sẽ sập với `undefined` — mà tệ
+ *   hơn nữa, nó chỉ sập lúc chạy chứ không bị bắt lúc biên dịch.
+ *
+ *   Gom về một hàm có kiểm tra thật thì tình huống xấu nhất chỉ là lỗi 401 sạch
+ *   sẽ. Đây là kiểu phòng thủ chiều sâu: lớp bảo vệ thứ hai cho trường hợp lớp
+ *   thứ nhất bị ai đó vô tình tháo mất.
+ */
+function getUserId(req: Request): string {
+  const sub = req.user?.sub;
+  if (!sub) {
+    throw new AppError(401, "Bạn cần đăng nhập để thực hiện thao tác này.");
+  }
+  return sub;
+}
 
 /**
  * GET /api/todos — lấy toàn bộ danh sách.
@@ -94,7 +124,7 @@ import { createTodoSchema, todoIdParamSchema, updateTodoContentSchema } from "..
  */
 export async function getAllTodos(req: Request, res: Response, next: NextFunction) {
   try {
-    const todos = await todoService.getAllTodos();
+    const todos = await todoService.getAllTodos(getUserId(req));
     res.json({ success: true, data: todos });
   } catch (err) {
     next(err);
@@ -118,7 +148,7 @@ export async function getAllTodos(req: Request, res: Response, next: NextFunctio
 export async function getTodoById(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = todoIdParamSchema.parse(req.params);
-    const todo = await todoService.getTodoById(id);
+    const todo = await todoService.getTodoById(id, getUserId(req));
     res.json({ success: true, data: todo });
   } catch (err) {
     next(err);
@@ -145,7 +175,7 @@ export async function getTodoById(req: Request, res: Response, next: NextFunctio
 export async function createTodo(req: Request, res: Response, next: NextFunction) {
   try {
     const { content } = createTodoSchema.parse(req.body);
-    const todo = await todoService.createTodo(content);
+    const todo = await todoService.createTodo(content, getUserId(req));
     res.status(201).json({ success: true, data: todo });
   } catch (err) {
     next(err);
@@ -165,7 +195,7 @@ export async function createTodo(req: Request, res: Response, next: NextFunction
 export async function deleteTodo(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = todoIdParamSchema.parse(req.params);
-    await todoService.deleteTodo(id);
+    await todoService.deleteTodo(id, getUserId(req));
     res.json({ success: true, message: "Đã xóa todo" });
   } catch (err) {
     next(err);
@@ -182,7 +212,7 @@ export async function updateTodoContent(req: Request, res: Response, next: NextF
   try {
     const { id } = todoIdParamSchema.parse(req.params);
     const { content } = updateTodoContentSchema.parse(req.body);
-    const todo = await todoService.updateTodoContent(id, content);
+    const todo = await todoService.updateTodoContent(id, content, getUserId(req));
     res.json({ success: true, data: todo });
   } catch (err) {
     next(err);
@@ -198,7 +228,7 @@ export async function updateTodoContent(req: Request, res: Response, next: NextF
 export async function markTodoDone(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = todoIdParamSchema.parse(req.params);
-    const todo = await todoService.setTodoDone(id, true);
+    const todo = await todoService.setTodoDone(id, true, getUserId(req));
     res.json({ success: true, data: todo });
   } catch (err) {
     next(err);
@@ -214,7 +244,7 @@ export async function markTodoDone(req: Request, res: Response, next: NextFuncti
 export async function markTodoUndone(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = todoIdParamSchema.parse(req.params);
-    const todo = await todoService.setTodoDone(id, false);
+    const todo = await todoService.setTodoDone(id, false, getUserId(req));
     res.json({ success: true, data: todo });
   } catch (err) {
     next(err);

@@ -21,8 +21,9 @@
  *      Sau này muốn thêm token xác thực thì thêm ở đây, người dùng không thấy.
  */
 
+import { getAccessToken } from "./auth";
 import { DEFAULT_API_BASE_URL } from "./constants";
-import type { ApiResponse, Todo } from "./types";
+import type { ApiResponse, AuthSession, SessionUser, Todo } from "./types";
 
 /*
  * Đọc cấu hình MỘT LẦN khi module được nạp, thay vì đọc lại mỗi request.
@@ -77,7 +78,70 @@ export class ApiError extends Error {
  * đó là "dynamic" — render lại ở mỗi request thay vì dựng sẵn HTML lúc build.
  * Chạy `npm run build` bạn sẽ thấy dấu `ƒ` (Dynamic) bên cạnh `/` và `/todos/[id]`.
  */
+/*
+ * ----------------------------------------------------------------------------
+ * HAI CỬA GỌI API: `request` VÀ `publicRequest`
+ * ----------------------------------------------------------------------------
+ *
+ * Khác nhau đúng một điều: `request` đính kèm access token, `publicRequest` thì
+ * không. Cả hai đều gọi xuống `send()` — nơi giữ nguyên toàn bộ phần xử lý lỗi
+ * đã có từ trước.
+ *
+ * Vì sao tách đôi thay vì viết một hàm với tham số kiểu `needsAuth: boolean`?
+ *
+ *   Vì tách ra thì gọi nhầm trở nên KHÓ. `publicRequest` dùng cho đúng bốn API
+ *   mà người chưa đăng nhập bắt buộc phải gọi được: đăng ký, xác thực, đăng
+ *   nhập, gia hạn token. Mọi thứ còn lại dùng `request`.
+ *
+ *   Với một hàm có cờ bật/tắt, giá trị mặc định của cờ sẽ âm thầm quyết định số
+ *   phận của những dòng code viết vội sau này. Với hai tên hàm khác nhau, bạn
+ *   buộc phải chọn — và người đọc code nhìn tên hàm là biết ngay API đó công
+ *   khai hay cần đăng nhập.
+ */
+
+/** Gọi API KHÔNG kèm token — chỉ dùng cho các API xác thực. */
+async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  return send<T>(path, init);
+}
+
+/** Gọi API CÓ kèm access token. Dùng cho mọi thứ còn lại. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  /*
+   * Đọc access token từ cookie httpOnly.
+   *
+   * Dòng này chỉ chạy được vì `api.ts` luôn thực thi trên SERVER Next.js (bên
+   * trong Server Component hoặc Server Action) — đúng như phần đầu file đã nói.
+   * Trình duyệt không bao giờ chạy hàm này, nên nó cũng không bao giờ thấy token.
+   */
+  const accessToken = await getAccessToken();
+
+  if (!accessToken) {
+    /*
+     * Không có token thì dừng ngay, khỏi tốn một request vô ích ra backend chỉ để
+     * nhận về 401.
+     *
+     * Bình thường không rơi vào đây, vì `proxy.ts` đã chặn người chưa đăng nhập
+     * từ trước. Nhưng "bình thường không xảy ra" khác với "không bao giờ xảy ra":
+     * cookie có thể vừa hết hạn đúng khoảnh khắc đó, hoặc bị xoá giữa chừng. Có
+     * thêm một lớp kiểm tra ngay sát chỗ dùng thì lỗi cũng lỗi một cách rõ ràng.
+     */
+    throw new ApiError(401, "Bạn cần đăng nhập để thực hiện thao tác này.");
+  }
+
+  return send<T>(path, {
+    ...init,
+    /*
+     * Đây là dòng làm nên toàn bộ tính năng "chỉ thấy ghi chú của chính mình".
+     *
+     * `Bearer` là tiền tố bắt buộc theo chuẩn RFC 6750: backend cắt bỏ đúng 7 ký
+     * tự `"Bearer "` rồi mới kiểm phần còn lại. Viết thiếu chữ đó, hoặc thiếu dấu
+     * cách, là bị từ chối ngay.
+     */
+    headers: { Authorization: `Bearer ${accessToken}`, ...init?.headers },
+  });
+}
+
+async function send<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
 
   /*
@@ -181,4 +245,66 @@ export function setTodoDone(id: number, isDone: boolean) {
  */
 export function deleteTodo(id: number) {
   return request<unknown>(`/todos/${id}`, { method: "DELETE" });
+}
+
+/*
+ * ============================================================================
+ * CÁC API XÁC THỰC
+ * ============================================================================
+ *
+ * Tất cả đều dùng `publicRequest`, vì chúng phải gọi được khi CHƯA có token —
+ * đây chính là những cánh cửa để lấy token.
+ */
+
+/** Tạo tài khoản. Cognito sẽ gửi mã 6 số về email. */
+export function register(email: string, password: string) {
+  return publicRequest<{ email: string }>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+/** Kích hoạt tài khoản bằng mã 6 số. */
+export function confirmRegistration(email: string, code: string) {
+  return publicRequest<{ email: string }>("/auth/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+/** Gửi lại mã xác thực — cho trường hợp email vào Spam hoặc mã đã hết hạn. */
+export function resendCode(email: string) {
+  return publicRequest<{ email: string }>("/auth/resend-code", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Đăng nhập: đổi email + mật khẩu lấy token. */
+export function login(email: string, password: string) {
+  return publicRequest<AuthSession>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+/**
+ * Đổi refresh token lấy access token mới.
+ *
+ * `username` là bắt buộc, và đây là chỗ rất dễ sai — xem lời giải thích dài
+ * trong `backend/src/services/auth.service.ts`, hàm `refreshTokens`.
+ *
+ * Response KHÔNG chứa refresh token mới: refresh token cũ vẫn dùng tiếp cho tới
+ * khi hết hạn 30 ngày, nên nơi gọi phải giữ nguyên nó, đừng ghi đè.
+ */
+export function refreshSession(refreshToken: string, username: string) {
+  return publicRequest<{ accessToken: string; expiresIn: number }>("/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({ refreshToken, username }),
+  });
+}
+
+/** Hỏi backend "token này còn sống không, và tôi là ai?". */
+export function getMe() {
+  return request<SessionUser>("/auth/me");
 }

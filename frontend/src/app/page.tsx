@@ -45,7 +45,9 @@
 
 import AddTodoForm from "@/components/AddTodoForm";
 import TodoItem from "@/components/TodoItem";
+import UserMenu from "@/components/UserMenu";
 import { getTodos } from "@/lib/api";
+import { getSessionUser } from "@/lib/auth";
 import type { Todo } from "@/lib/types";
 import styles from "./page.module.css";
 
@@ -67,6 +69,20 @@ import styles from "./page.module.css";
  * biết phải render cái gì. Tên hàm đặt gì cũng được, chỉ cần default export.
  */
 export default async function TodoListPage() {
+  /*
+   * Đọc thông tin người dùng từ cookie phiên đăng nhập, để hiện email lên đầu trang.
+   *
+   * Về lý thuyết `user` không thể là `null` ở đây, vì `proxy.ts` đã chặn người
+   * chưa đăng nhập từ trước. Nhưng ta vẫn xử lý trường hợp `null` (chỉ hiện
+   * `<UserMenu>` khi có dữ liệu) thay vì dùng dấu `!` để ép TypeScript im lặng.
+   *
+   * Lý do: proxy là lớp TRẢI NGHIỆM chứ không phải lớp bảo mật — matcher có thể
+   * bị cấu hình sai, cookie có thể hỏng giữa chừng. Nếu điều "không thể xảy ra"
+   * ấy xảy ra thật, ta muốn trang chỉ thiếu mất thanh email, chứ không muốn cả
+   * trang sập.
+   */
+  const user = await getSessionUser();
+
   /*
    * Vì sao dùng `let` và try/catch thay vì `await` thẳng?
    *
@@ -101,6 +117,9 @@ export default async function TodoListPage() {
 
   return (
     <main className={styles.page}>
+      {/* Thanh hiện email + nút đăng xuất. Xem UserMenu.tsx — nó là Server Component. */}
+      {user ? <UserMenu user={user} /> : null}
+
       <header className={styles.header}>
         <h1 className={styles.title}>Todo List</h1>
         <p className={styles.subtitle}>

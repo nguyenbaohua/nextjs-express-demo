@@ -1,0 +1,153 @@
+/*
+ * CSS dùng chung cho ba trang đăng nhập / đăng ký / xác thực.
+ *
+ * Gom vào một file thay vì mỗi trang một file: ba trang này trông gần như giống
+ * hệt nhau, tách ra sẽ thành ba bản sao và sửa một chỗ phải nhớ sửa cả ba.
+ *
+ * Mọi màu đều lấy từ biến CSS trong `globals.css` (`var(--surface)`, `var(--border)`
+ * ...). Nhờ vậy giao diện tự đổi theo chế độ sáng/tối của máy mà không cần viết
+ * thêm dòng nào cho dark mode.
+ */
+
+.page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin-top: 6px;
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+/*
+ * Ô nhập mã 6 số: chữ to, giãn cách rộng, canh giữa.
+ * `font-variant-numeric: tabular-nums` khiến mọi chữ số rộng bằng nhau, nên mã
+ * không bị "nhảy" khi người dùng gõ.
+ */
+.codeInput {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.success {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--success) 40%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success);
+  font-size: 13px;
+}
+
+.footer {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.link {
+  color: var(--accent);
+  font-weight: 550;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* Nút phụ dạng chữ, dùng cho "Gửi lại mã". */
+.linkButton {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.linkButton:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.linkButton:disabled {
+  color: var(--muted);
+  cursor: default;
+}

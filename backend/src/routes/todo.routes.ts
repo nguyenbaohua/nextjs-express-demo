@@ -58,6 +58,7 @@
 
 import { Router } from "express";
 import * as todoController from "../controllers/todo.controller";
+import { requireAuth } from "../middlewares/requireAuth";
 
 /*
  * `Router()` tạo ra một "mini-app" Express: nó cũng có `.get`, `.post`,
@@ -67,6 +68,33 @@ import * as todoController from "../controllers/todo.controller";
  * Nhờ vậy mỗi nhóm chức năng có file router riêng, app chính không phình to.
  */
 const router = Router();
+
+/*
+ * ============================================================================
+ * MỘT DÒNG BẢO VỆ TẤT CẢ
+ * ============================================================================
+ *
+ * `router.use(requireAuth)` gắn người gác cổng vào TOÀN BỘ router này. Mọi route
+ * khai báo BÊN DƯỚI dòng này đều phải có access token hợp lệ mới đi qua được.
+ *
+ * Thứ tự là tất cả. Middleware chỉ ảnh hưởng tới những gì đứng sau nó — chuyển
+ * dòng này xuống cuối file thì nó bảo vệ đúng con số không route.
+ *
+ * Vì sao dùng `router.use(...)` thay vì gắn `requireAuth` vào từng dòng route?
+ *
+ *   Cách gắn từng dòng cũng chạy, nhưng nó biến bảo mật thành thứ PHẢI NHỚ. Ngày
+ *   nào đó bạn thêm route thứ tám lúc đang vội và quên một chữ — route ấy lặng lẽ
+ *   để lộ dữ liệu của mọi người, không có thông báo lỗi nào, không có test nào
+ *   đỏ. Còn với `router.use`, route mới TỰ ĐỘNG được bảo vệ; muốn để hở thì phải
+ *   cố tình tách nó ra router khác.
+ *
+ *   Nguyên tắc rút ra: hãy làm cho lựa chọn AN TOÀN trở thành mặc định, và lựa
+ *   chọn nguy hiểm phải tốn công mới làm được.
+ *
+ * Từ đây trở đi, mọi controller phía sau đọc được `req.user.sub` và dùng nó để
+ * chỉ đụng tới todo của đúng người đang gọi.
+ */
+router.use(requireAuth);
 
 /*
  * Chú ý: ta viết `todoController.getAllTodos` — KHÔNG có cặp ngoặc `()` phía sau.

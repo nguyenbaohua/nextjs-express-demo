@@ -141,6 +141,39 @@ model Todo {
    * trực tiếp (không qua Prisma) thì `updatedAt` sẽ KHÔNG được cập nhật.
    */
   updatedAt DateTime @updatedAt
+
+  /*
+   * CHỦ SỞ HỮU của todo này.
+   *
+   * Giá trị lưu ở đây là `sub` của AWS Cognito — một chuỗi UUID do Cognito sinh
+   * ra cho mỗi tài khoản, ví dụ "a4e8b1c2-9f3d-4a1b-8c7e-5d2f1a0b3c4d".
+   *
+   * Vì sao lưu `sub` chứ không lưu email?
+   *   Email người dùng ĐỔI ĐƯỢC. Nếu lưu email rồi ai đó đổi email, toàn bộ todo
+   *   của họ sẽ thành "mồ côi". Còn `sub` thì cố định vĩnh viễn từ lúc tài khoản
+   *   được tạo cho tới lúc bị xoá — đúng thứ ta cần cho một khoá tham chiếu.
+   *
+   * Vì sao là `String` chứ không phải quan hệ (relation) tới một model `User`?
+   *   Vì danh sách người dùng KHÔNG nằm trong database này — nó nằm bên Cognito.
+   *   Database của ta chỉ giữ cái ID để biết todo nào của ai. Đây là đánh đổi cố
+   *   ý khi dùng dịch vụ xác thực bên ngoài: bớt được toàn bộ việc quản lý mật
+   *   khẩu, đổi lại không JOIN sang bảng người dùng được nữa.
+   */
+  userId String
+
+  /*
+   * @@index tạo một CHỈ MỤC trên cột userId.
+   *
+   * Chỉ mục giống như mục lục cuối một cuốn sách. Không có nó, để trả lời câu
+   * "todo nào của user X?" Postgres phải đọc lần lượt TỪNG dòng trong bảng và so
+   * sánh (gọi là "full table scan"). Có nó, Postgres nhảy thẳng tới đúng nhóm
+   * dòng cần tìm.
+   *
+   * Với 20 dòng thì không khác gì nhau. Với 1 triệu dòng thì là khác biệt giữa
+   * vài mili-giây và vài giây. Mà câu query `WHERE userId = ...` này chạy ở MỌI
+   * request sau khi có đăng nhập — nên đây là chỉ mục đáng giá nhất của bảng.
+   */
+  @@index([userId])
 }
 
 /*

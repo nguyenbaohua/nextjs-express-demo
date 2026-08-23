@@ -64,3 +64,58 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
  *   - `{ error: "..." }` → submit thất bại, kèm thông báo để hiện lên màn hình
  */
 export type FormState = { error: string } | null;
+
+/*
+ * ============================================================================
+ * KIỂU DỮ LIỆU CHO PHẦN ĐĂNG NHẬP
+ * ============================================================================
+ */
+
+/**
+ * Thông tin người dùng lấy từ Cognito, đủ để hiển thị và để gia hạn token.
+ */
+export type SessionUser = {
+  /**
+   * `sub` — ID vĩnh viễn của tài khoản trong Cognito.
+   * Đây chính là giá trị nằm ở cột `Todo.userId` bên database.
+   */
+  sub: string;
+  /** Email, dùng để hiển thị "Xin chào ..." trên giao diện. */
+  email: string;
+  /**
+   * Tên đăng nhập THẬT bên trong Cognito (thường là một chuỗi UUID khi User Pool
+   * cấu hình đăng nhập bằng email).
+   *
+   * Trông thừa vì đã có `sub`, nhưng bắt buộc phải giữ: luồng gia hạn token cần
+   * đúng chuỗi này để tính SECRET_HASH. Lý do đầy đủ nằm trong
+   * `backend/src/services/auth.service.ts`, hàm `refreshTokens`.
+   */
+  username: string;
+};
+
+/**
+ * Những gì backend trả về sau khi đăng nhập thành công.
+ *
+ * Chú ý là KHÔNG có `idToken` ở đây. Backend có trả nó về, nhưng frontend không
+ * cần: thông tin duy nhất ta muốn từ ID token là email, mà backend đã đọc sẵn và
+ * đặt vào `user`. Không lưu thứ mình không dùng — mỗi token lưu thêm là thêm một
+ * thứ có thể rò rỉ.
+ */
+export type AuthSession = {
+  accessToken: string;
+  refreshToken: string;
+  /** Số GIÂY access token còn sống (Cognito mặc định 3600 = 1 giờ). */
+  expiresIn: number;
+  user: SessionUser;
+};
+
+/**
+ * Trạng thái trả về từ các form đăng nhập / đăng ký / xác thực.
+ *
+ * Khác với `FormState` của todo ở chỗ có thêm `success` và `message`, vì các form
+ * này cần báo tin vui (`"Đã gửi lại mã"`) chứ không chỉ báo lỗi.
+ */
+export type AuthFormState =
+  | { error: string; success?: never; message?: never }
+  | { success: true; message: string; error?: never }
+  | null;

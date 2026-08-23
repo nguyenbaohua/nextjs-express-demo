@@ -1,0 +1,40 @@
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /*
+   * `min-width: 0` là mẹo bắt buộc khi cắt chữ bên trong flexbox.
+   *
+   * Mặc định một flex item không co nhỏ hơn nội dung của nó, nên `text-overflow:
+   * ellipsis` bên dưới sẽ không bao giờ có tác dụng — email dài sẽ đẩy nút "Đăng
+   * xuất" tràn ra ngoài. Đặt `min-width: 0` cho phép nó co lại và dấu "..." mới
+   * xuất hiện đúng như mong đợi.
+   */
+  min-width: 0;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.email {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

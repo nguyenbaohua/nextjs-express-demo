@@ -40,6 +40,19 @@ PORT=3000
 
 > Lưu ý: `DATABASE_URL` phải khớp với `DB_USERNAME`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME` ở trên vì Prisma chỉ đọc `DATABASE_URL`.
 
+### Cấu hình AWS Cognito (bắt buộc)
+
+Từ khi có tính năng đăng nhập, backend **sẽ không khởi động** nếu thiếu bốn biến sau — nó dừng ngay kèm thông báo chỉ rõ biến nào còn trống:
+
+```
+AWS_REGION=
+COGNITO_USER_POOL_ID=
+COGNITO_CLIENT_ID=
+COGNITO_CLIENT_SECRET=
+```
+
+👉 **Cách lấy từng giá trị trong AWS Console: xem [cognito-setup.md](cognito-setup.md).** Tài liệu đó viết cho người chưa từng dùng Cognito, khoảng 10–15 phút là xong và không tốn phí.
+
 ## 4. Khởi động database bằng Docker
 
 Project đã có sẵn `docker-compose.yml` để dựng một container PostgreSQL trống.
@@ -81,11 +94,29 @@ npm run prisma:studio
 
 ## 6. Chạy project ở môi trường dev
 
+Dự án gồm **hai** phần chạy song song, nên cần hai cửa sổ terminal.
+
+**Terminal 1 — backend:**
+
 ```bash
+cd backend
 npm run dev
 ```
 
-Server sẽ chạy tại `http://localhost:3000` (hoặc theo giá trị `PORT` trong `.env`).
+Chạy tại `http://localhost:3000` (hoặc theo `PORT` trong `.env`).
+
+**Terminal 2 — frontend:**
+
+```bash
+cd frontend
+npm install          # chỉ lần đầu
+cp .env.example .env.local
+npm run dev
+```
+
+Chạy tại `http://localhost:3001`. Đây là địa chỉ bạn mở trong trình duyệt — **không mở cổng 3000**, vì cổng đó chỉ trả về JSON.
+
+Mở <http://localhost:3001> sẽ bị đưa thẳng tới trang đăng nhập. Bấm **Đăng ký**, dùng một email thật để nhận mã xác thực 6 số.
 
 ## 7. Build & chạy production (tuỳ chọn)
 
@@ -98,11 +129,23 @@ npm run start
 
 ```bash
 git clone <repo-url>
-cd todo-list-be-nodejs
+cd <ten-thu-muc>
+
+# --- backend ---
+cd backend
 npm install
 cp .env.example .env
+# Điền DATABASE_URL và 4 biến Cognito vào .env — xem cognito-setup.md
 docker compose up -d
 npm run prisma:generate
 npm run prisma:migrate
-npm run dev
+npm run dev                    # cổng 3000
+
+# --- frontend (terminal khác) ---
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev                    # cổng 3001 ← mở cái này trong trình duyệt
 ```
+
+Nếu backend báo `❌ Chưa cấu hình AWS Cognito`, nghĩa là bạn còn thiếu bước [cognito-setup.md](cognito-setup.md).

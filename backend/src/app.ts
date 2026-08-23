@@ -55,6 +55,7 @@ import cors from "cors";
 import express from "express";
 import { errorHandler } from "./middlewares/errorHandler";
 import { notFound } from "./middlewares/notFound";
+import authRoutes from "./routes/auth.routes";
 import todoRoutes from "./routes/todo.routes";
 
 /*
@@ -134,6 +135,19 @@ app.use(express.json());
  * Muốn thêm nhóm chức năng mới (ví dụ user), bạn chỉ cần viết thêm một file
  * router rồi thêm một dòng `app.use("/api/users", userRoutes)` ở đây.
  */
+/*
+ * Hai nhóm route, và sự khác nhau giữa chúng là điều đáng chú ý nhất ở file này:
+ *
+ *   /api/auth   — phần lớn CÔNG KHAI. Phải vậy, vì đây là những cánh cửa dành
+ *                 cho người CHƯA có token: đăng ký, xác thực email, đăng nhập.
+ *
+ *   /api/todos  — TOÀN BỘ cần token. Bên trong `todo.routes.ts` có một dòng
+ *                 `router.use(requireAuth)` chắn ngang trước mọi route.
+ *
+ * Ranh giới "chỗ nào cần đăng nhập" vì thế nằm gọn trong hai file router, không
+ * rải rác khắp các controller — đọc là thấy ngay toàn cảnh.
+ */
+app.use("/api/auth", authRoutes);
 app.use("/api/todos", todoRoutes);
 
 /*

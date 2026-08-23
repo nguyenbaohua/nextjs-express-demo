@@ -16,7 +16,9 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1116.0",
     "@prisma/client": "^6.19.3",
+    "aws-jwt-verify": "^5.2.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

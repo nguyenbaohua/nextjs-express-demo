@@ -218,7 +218,107 @@ Hai trang có dữ liệu đều là `ƒ` (Dynamic) — đúng như mong muốn.
 
 ---
 
-## 7. Thứ tự đọc code
+## 7. Đăng nhập — token cất ở đâu và ai giữ cửa
+
+Phần này giải thích ba quyết định thiết kế của tính năng đăng nhập. Chi tiết kỹ thuật của Cognito nằm ở `backend/LEARN.md` mục 10; ở đây chỉ bàn phần Next.js.
+
+### Toàn cảnh: token đi những đâu
+
+```mermaid
+sequenceDiagram
+    participant B as Trình duyệt
+    participant N as Server Next.js
+    participant E as Express
+    participant C as Cognito
+
+    B->>N: submit form /login (Server Action)
+    N->>E: POST /api/auth/login
+    E->>C: InitiateAuth
+    C-->>E: accessToken + refreshToken + user
+    E-->>N: 3 thứ trên
+    N-->>B: Set-Cookie (httpOnly) × 3
+
+    Note over B,N: Từ đây, mọi lần tải trang
+    B->>N: GET / (cookie tự đính kèm)
+    N->>N: đọc cookie → lấy accessToken
+    N->>E: GET /api/todos + Bearer token
+    E-->>N: todo của riêng người này
+    N-->>B: HTML đã có sẵn dữ liệu
+```
+
+Điều đáng chú ý nhất: **token không bao giờ đi vào tầng JavaScript của trình duyệt**. Nó đi từ Express → server Next.js → cookie, và mỗi lần dùng thì server Next.js đọc lại từ cookie. Code chạy trong trình duyệt không có cách nào chạm tới.
+
+### Quyết định 1 — Cookie `httpOnly`, không phải `localStorage`
+
+Rất nhiều hướng dẫn trên mạng bảo lưu token vào `localStorage`. Đừng.
+
+| Chỗ cất | JavaScript đọc được? | Sống qua F5? | Chống XSS? |
+|---|---|---|---|
+| `localStorage` | ✅ Có | ✅ | ❌ **Không** |
+| React state | ❌ | ❌ Mất | ✅ |
+| Cookie `httpOnly` | ❌ | ✅ | ✅ |
+
+`localStorage` mở toang cho mọi đoạn script chạy trên trang — kể cả script đến từ một thư viện npm bị cài mã độc. Cookie `httpOnly` thì `document.cookie` không nhìn thấy, nên có XSS cũng không mang token đi đâu được.
+
+Cách này khả thi là nhờ kiến trúc sẵn có: trình duyệt chỉ nói chuyện với server Next.js, và chính server đó mới gọi Express. Xem `src/lib/auth.ts`.
+
+### Quyết định 2 — `proxy.ts` là lớp trải nghiệm, không phải lớp bảo mật
+
+📌 Từ Next.js 16, `middleware.ts` đổi tên thành **`proxy.ts`**. Tài liệu cũ nhắc `middleware.ts` chính là file này.
+
+`proxy.ts` chỉ nhìn xem cookie có tồn tại hay không — nó **không** kiểm chữ ký token. Ai cũng tự tạo được một cookie tên `access_token` với nội dung bịa để qua mặt nó.
+
+Nhưng qua được cũng vô ích, vì lớp bảo vệ thật nằm ở Express. Bạn tự kiểm chứng được:
+
+```bash
+curl -H 'Cookie: access_token=toi-tu-bia-ra' http://localhost:3001/
+```
+
+Proxy cho qua (HTTP 200), rồi trang hiện hộp lỗi *"Phiên đăng nhập không hợp lệ hoặc đã hết hạn"* — câu đó đến từ `requireAuth` bên Express.
+
+Đây là **phòng thủ nhiều lớp**, và mỗi lớp có một việc:
+
+| Lớp | Ở đâu | Việc | Qua mặt được không? |
+|---|---|---|---|
+| Trải nghiệm | `proxy.ts` | Đưa người chưa đăng nhập tới form đăng nhập | Được, và không sao cả |
+| **Bảo mật** | `requireAuth` (Express) | Kiểm chữ ký Cognito | **Không** — cần khoá riêng của AWS |
+| **Bảo mật** | `todo.service.ts` | Mọi query kèm `WHERE userId` | **Không** |
+
+Nguyên tắc rút ra: mọi thứ chạy gần người dùng đều có thể bị giả mạo. Chỉ những gì server tự kiểm chứng mới đáng tin.
+
+### Quyết định 3 — Gia hạn token đặt trong `proxy.ts`
+
+Access token sống 1 giờ. Nếu hết hạn là bắt đăng nhập lại thì không ai chịu nổi, nên proxy lặng lẽ dùng refresh token xin token mới.
+
+Vì sao phải là proxy mà không phải `api.ts`? Vì gia hạn xong thì phải **lưu** token mới vào cookie, mà Next.js chỉ cho ghi cookie ở ba nơi:
+
+| Nơi | Ghi cookie được? |
+|---|---|
+| Server Component (`page.tsx`) | ❌ Không |
+| Server Action (`auth-actions.ts`) | ✅ Có |
+| Route Handler | ✅ Có |
+| `proxy.ts` | ✅ Có |
+
+Lý do rất vật lý: `Set-Cookie` là một HTTP header, mà header phải đi **trước** nội dung. Tới lúc Server Component render thì header đã gửi đi rồi. Đây là cách HTTP vận hành, không phải hạn chế do Next.js đặt ra.
+
+`api.ts` chủ yếu được gọi từ Server Component → không ghi cookie được → đặt phần gia hạn ở đó thì mỗi request lại phải gia hạn lại từ đầu vì không có chỗ cất kết quả.
+
+Một mẹo nhỏ đáng để ý trong `auth.ts`: hạn của **cookie** access token được đặt bằng đúng hạn của **token** (trừ hao 1 phút). Nhờ vậy câu hỏi "token còn sống không?" trở thành "cookie còn đó không?" — trình duyệt tự xoá giúp, không cần so sánh thời gian ở đâu cả.
+
+### Các file của phần đăng nhập
+
+| File | Việc |
+|---|---|
+| [src/lib/auth.ts](src/lib/auth.ts) | Đọc/ghi cookie. Đọc file này trước. |
+| [src/lib/auth-actions.ts](src/lib/auth-actions.ts) | Server Actions: đăng ký, xác thực, đăng nhập, đăng xuất |
+| [src/proxy.ts](src/proxy.ts) | Chặn cửa + tự động gia hạn token |
+| [src/components/LoginForm.tsx](src/components/LoginForm.tsx) | Form đăng nhập, `useActionState` |
+| [src/components/ConfirmForm.tsx](src/components/ConfirmForm.tsx) | Hai action trên một trang |
+| [src/components/UserMenu.tsx](src/components/UserMenu.tsx) | Nút bấm được mà vẫn là Server Component |
+
+---
+
+## 8. Thứ tự đọc code
 
 Đọc theo thứ tự này sẽ thấy mọi thứ nối vào nhau:
 
@@ -233,9 +333,11 @@ Hai trang có dữ liệu đều là `ƒ` (Dynamic) — đúng như mong muốn.
 9. **[src/components/EditTodoForm.tsx](src/components/EditTodoForm.tsx)** — controlled form, file khó nhất.
 10. **[src/components/TodoDetailActions.tsx](src/components/TodoDetailActions.tsx)** — `useRouter`, điều hướng bằng code.
 
+Phần đăng nhập đọc sau, khi đã nắm mười file trên — bảng file nằm ở cuối mục 7.
+
 ---
 
-## 8. Thử nghịch để hiểu sâu hơn
+## 9. Thử nghịch để hiểu sâu hơn
 
 Vài thí nghiệm nhỏ, làm xong nhớ hoàn tác:
 
@@ -244,10 +346,14 @@ Vài thí nghiệm nhỏ, làm xong nhớ hoàn tác:
 3. **Xóa `revalidatePath` trong `createTodoAction`** → thêm task xong danh sách không đổi. Bấm F5 mới thấy. Đó là việc `revalidatePath` đang làm.
 4. **Đổi `cache: "no-store"` thành `cache: "force-cache"`** trong `api.ts` → dữ liệu bị đóng băng.
 5. **Tắt backend rồi tải lại trang** → thấy hộp lỗi thay vì màn hình lỗi đỏ. Đó là khối `try/catch` trong `app/page.tsx`.
+6. **Đăng nhập, rồi mở DevTools → Application → Cookies** → thấy ba cookie, cột `HttpOnly` đều tick. Giờ gõ `document.cookie` vào Console: chuỗi trả về **không** chứa token. Đó là `httpOnly` đang làm việc.
+7. **Xoá cookie `access_token` (giữ nguyên hai cookie kia) rồi F5** → trang vẫn hiện bình thường. Bạn vừa chứng kiến `proxy.ts` tự gia hạn token mà không làm phiền ai.
+8. **Xoá cả ba cookie rồi F5** → bị đá về `/login?next=/`. Đăng nhập lại sẽ quay đúng về trang cũ.
+9. **Đăng ký tài khoản thứ hai, tạo vài todo, rồi đăng nhập lại bằng tài khoản đầu** → danh sách của mỗi người tách bạch hoàn toàn. Đây là bằng chứng cuối cùng rằng tính năng chạy đúng.
 
 ---
 
-## 9. Đọc thêm
+## 10. Đọc thêm
 
 Bản Next.js dùng ở đây (16.3.2) có tài liệu **nằm sẵn trong máy**, không cần lên mạng:
 

@@ -183,19 +183,36 @@ Nguyên tắc: **validate ở biên**. Chỉ kiểm tra một lần duy nhất t
 9. **[src/middlewares/errorHandler.ts](src/middlewares/errorHandler.ts)** — quy ước 4 tham số.
 10. **[src/utils/AppError.ts](src/utils/AppError.ts)** — lỗi mang theo mã status.
 
+Phần xác thực đọc sau, khi đã nắm được mười file trên. Thứ tự riêng của nó:
+
+11. **[src/lib/cognito.ts](src/lib/cognito.ts)** — ba loại token, JWKS, `SECRET_HASH`. Đọc đầu tiên trong nhóm này.
+12. **[src/middlewares/requireAuth.ts](src/middlewares/requireAuth.ts)** — người gác cổng, chỗ `req.user` sinh ra.
+13. **[src/schemas/auth.schema.ts](src/schemas/auth.schema.ts)** — luật validate cho email, mật khẩu, mã 6 số.
+14. **[src/services/auth.service.ts](src/services/auth.service.ts)** — gọi Cognito và dịch lỗi AWS sang tiếng Việt.
+15. **[src/controllers/auth.controller.ts](src/controllers/auth.controller.ts)** — sáu API xác thực.
+16. **[src/types/express.d.ts](src/types/express.d.ts)** — cách khai báo thêm `req.user` cho TypeScript.
+
 ---
 
 ## 8. Bảng API đầy đủ
 
+**Toàn bộ route `/api/todos` đều yêu cầu header `Authorization: Bearer <accessToken>`.** Thiếu header là nhận 401 ngay, không có ngoại lệ — xem mục 10 để hiểu vì sao và bằng cách nào.
+
+Và mọi kết quả đều đã được lọc theo người đang gọi: "mảng todo" dưới đây nghĩa là *todo của riêng bạn*, không phải toàn bộ bảng.
+
 | Phương thức | Đường dẫn | Body | Trả về |
 |---|---|---|---|
-| GET | `/api/todos` | — | Mảng todo, mới nhất trước |
-| GET | `/api/todos/:id` | — | Một todo, hoặc 404 |
-| POST | `/api/todos` | `{ "content": "..." }` | 201 + todo vừa tạo |
+| GET | `/api/todos` | — | Mảng todo **của bạn**, mới nhất trước |
+| GET | `/api/todos/:id` | — | Một todo của bạn, hoặc 404 |
+| POST | `/api/todos` | `{ "content": "..." }` | 201 + todo vừa tạo (gắn sẵn `userId` của bạn) |
 | PUT | `/api/todos/:id` | `{ "content": "..." }` | Todo sau khi sửa |
 | PATCH | `/api/todos/:id/done` | — | Todo đã đánh dấu xong |
 | PATCH | `/api/todos/:id/undone` | — | Todo đã bỏ đánh dấu |
 | DELETE | `/api/todos/:id` | — | `{ success, message }` |
+
+Todo của người khác luôn trả về **404**, không phải 403 — cố ý như vậy, lý do ở mục 10.
+
+Bảng API xác thực (`/api/auth/*`) nằm riêng ở mục 10.
 
 Mọi phản hồi đều được gói trong một "phong bì" cố định:
 
@@ -210,27 +227,158 @@ Nhờ vậy frontend chỉ cần viết **một** hàm bóc phong bì dùng chun
 
 ## 9. Chạy thử bằng dòng lệnh
 
-Không cần frontend, `curl` là đủ:
+Không cần frontend, `curl` là đủ. Nhưng từ khi có đăng nhập thì phải lấy token trước.
+
+**Bước 1 — đăng nhập lấy token** (tài khoản phải đã xác thực email):
 
 ```bash
-# Lấy danh sách
-curl http://localhost:3000/api/todos
+curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ban@example.com","password":"MatKhau123!"}'
+```
+
+Để đỡ phải copy chuỗi token dài loằng ngoằng, cất luôn vào biến shell:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ban@example.com","password":"MatKhau123!"}' \
+  | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
+
+echo "${TOKEN:0:40}..."   # in ra 40 ký tự đầu để chắc là đã lấy được
+```
+
+**Bước 2 — gọi API kèm token:**
+
+```bash
+# Lấy danh sách (chỉ todo của bạn)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/todos
 
 # Tạo mới
 curl -X POST http://localhost:3000/api/todos \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"content":"Học Express"}'
 
 # Đánh dấu xong
-curl -X PATCH http://localhost:3000/api/todos/1/done
+curl -X PATCH -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/todos/1/done
 
 # Xoá
-curl -X DELETE http://localhost:3000/api/todos/1
+curl -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3000/api/todos/1
 ```
+
+**Thử bỏ token đi** để thấy người gác cổng làm việc:
+
+```bash
+curl -i http://localhost:3000/api/todos
+# HTTP/1.1 401 Unauthorized
+# {"success":false,"message":"Bạn cần đăng nhập để thực hiện thao tác này."}
+```
+
+Lưu ý: access token chỉ sống **1 giờ**. Hết hạn thì chạy lại Bước 1.
 
 ---
 
-## 10. Những cái bẫy hay gặp
+## 10. Xác thực bằng AWS Cognito — "chỉ thấy ghi chú của mình"
+
+Phần này là thứ mới nhất và cũng đáng đọc nhất trong dự án. Trước khi đọc code, hãy nắm ba ý sau — chúng là toàn bộ câu chuyện.
+
+### Ý 1 — Cognito chỉ trả lời "anh là ai", không giữ dữ liệu của bạn
+
+Cognito lưu danh sách người dùng và mật khẩu. Nó **không** lưu todo. Khi đăng nhập thành công, nó đưa lại một tấm "hộ chiếu" đã ký gọi là **JWT**, bên trong có `sub` — mã định danh vĩnh viễn của tài khoản đó.
+
+`sub` ấy chính là giá trị nằm ở cột `Todo.userId` trong PostgreSQL. Đó là toàn bộ sợi dây nối giữa hai hệ thống.
+
+### Ý 2 — Backend tự kiểm hộ chiếu, không hỏi lại Cognito
+
+Đây là điểm mà người mới hay hiểu sai nhất.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant E as Express
+    participant K as Cognito JWKS
+    participant DB as PostgreSQL
+
+    Note over E,K: CHỈ LẦN ĐẦU TIÊN
+    E->>K: tải bộ khoá công khai (jwks.json)
+    K-->>E: public keys → cache trong RAM
+
+    Note over C,DB: MỌI REQUEST SAU ĐÓ
+    C->>E: GET /api/todos<br/>Authorization: Bearer eyJ...
+    E->>E: kiểm chữ ký bằng khoá đã cache<br/>(KHÔNG gọi mạng)
+    E->>E: lấy sub từ token → req.user.sub
+    E->>DB: SELECT * FROM "Todo" WHERE "userId" = sub
+    DB-->>E: chỉ todo của người này
+    E-->>C: 200 { success: true, data: [...] }
+```
+
+Cognito ký token bằng **khoá riêng** mà chỉ nó giữ. Ai cũng tải được **khoá công khai** để kiểm chữ ký, nhưng không ai tạo được chữ ký giả. Nên Express chỉ cần tải khoá công khai một lần rồi tự kiểm mọi token tại chỗ.
+
+Hệ quả thực tế: API chạy nhanh, và Cognito có sập thì người đang đăng nhập vẫn dùng app bình thường (chỉ không đăng nhập mới được).
+
+### Ý 3 — `userId` đến từ chữ ký, không đến từ client
+
+Đây là ý quan trọng nhất về mặt bảo mật.
+
+`requireAuth` đọc `sub` **từ bên trong token đã kiểm chữ ký** rồi gắn vào `req.user`. Client không có cách nào ảnh hưởng tới giá trị đó. Nếu thay vào đó ta cho client gửi `userId` trong body, thì ai cũng sửa được một con số trong DevTools để đọc todo của người khác.
+
+Và mọi câu query trong `todo.service.ts` đều kèm `userId`:
+
+```ts
+// SAI — ai đoán đúng id là đọc được todo người khác (lỗ hổng IDOR)
+prisma.todo.findUnique({ where: { id } })
+
+// ĐÚNG — phải thoả cả hai điều kiện
+prisma.todo.findFirst({ where: { id, userId } })
+```
+
+### Các file liên quan, theo thứ tự nên đọc
+
+| Thứ tự | File | Vai trò |
+|---|---|---|
+| 1 | `src/lib/cognito.ts` | Cấu hình, `SECRET_HASH`, hai verifier. **Đọc file này trước** — nó giải thích ba loại token. |
+| 2 | `src/middlewares/requireAuth.ts` | Người gác cổng: đọc header, kiểm token, gắn `req.user` |
+| 3 | `src/services/auth.service.ts` | Gọi Cognito: đăng ký, xác thực, đăng nhập, gia hạn |
+| 4 | `src/services/todo.service.ts` | Mọi query đều kèm `userId` — phần chống IDOR |
+| 5 | `src/routes/todo.routes.ts` | Một dòng `router.use(requireAuth)` bảo vệ toàn bộ |
+
+### Ba loại token — bảng tra nhanh
+
+| Token | Sống | Chứa gì | Dùng làm gì |
+|---|---|---|---|
+| **ID token** | 1 giờ | email, tên, `sub` | Biết người dùng LÀ AI → để hiển thị |
+| **Access token** | 1 giờ | `sub`, `username`, scope | Gửi kèm mỗi request API → để mở cửa |
+| **Refresh token** | 30 ngày | (chuỗi mờ) | Đổi lấy hai token trên khi chúng hết hạn |
+
+Vì sao chia ba? Access token đi ra vào mạng ở **mọi** request nên rủi ro lộ cao → cho sống ngắn. Refresh token hiếm khi được gửi đi → cho sống dài được. Tách đôi trách nhiệm để vừa tiện vừa an toàn.
+
+### Bảng API xác thực
+
+| Method | Đường dẫn | Cần token? | Việc |
+|---|---|---|---|
+| POST | `/api/auth/register` | Không | Tạo tài khoản, Cognito gửi mã 6 số về email |
+| POST | `/api/auth/confirm` | Không | Nhập mã 6 số để kích hoạt |
+| POST | `/api/auth/resend-code` | Không | Gửi lại mã |
+| POST | `/api/auth/login` | Không | Đổi email + mật khẩu lấy 3 token |
+| POST | `/api/auth/refresh` | Không* | Đổi refresh token lấy access token mới |
+| GET | `/api/auth/me` | **Có** | Trả về danh tính đọc từ token |
+
+\* `/refresh` không cần *access* token (nó được gọi đúng lúc access token đã hết hạn), nhưng vẫn phải có refresh token hợp lệ — Cognito từ chối ngay nếu không.
+
+### Ba cái bẫy của Cognito, đã gặp và đã xử lý trong code này
+
+1. **`ALLOW_USER_PASSWORD_AUTH` mặc định TẮT.** Quên tick trong AWS Console → lỗi `USER_PASSWORD_AUTH flow not enabled for this client`. Xem `.note/cognito-setup.md` mục 4.10.
+
+2. **`SECRET_HASH` lúc refresh phải tính bằng `cognito:username`, không phải email.** Luồng `USER_PASSWORD_AUTH` tính bằng email (vì email nằm ở tham số `USERNAME`), nhưng luồng `REFRESH_TOKEN_AUTH` không có tham số đó nên Cognito dùng tên đăng nhập thật — một chuỗi UUID. Sai chỗ này thì nhận lỗi `Unable to verify secret hash for client`, một thông báo không gợi ý gì cả. Đây là lý do `login()` phải trả thêm `username` về cho frontend giữ.
+
+3. **`/refresh` không trả về refresh token mới.** Refresh token cũ vẫn dùng tiếp tới khi hết 30 ngày. Vô tình ghi đè nó bằng `undefined` thì người dùng bị đá ra sau đúng một giờ.
+
+---
+
+## 11. Những cái bẫy hay gặp
 
 1. **`req.body` là `undefined`** → quên `app.use(express.json())`, hoặc client không gửi header `Content-Type: application/json`.
 2. **Middleware lỗi không bao giờ chạy** → thiếu tham số thứ tư. Express nhận diện middleware lỗi bằng cách **đếm số tham số**; phải đủ `(err, req, res, next)` dù không dùng tới `next`.
@@ -243,7 +391,7 @@ curl -X DELETE http://localhost:3000/api/todos/1
 
 ---
 
-## 11. Thử nghịch để hiểu sâu hơn
+## 12. Thử nghịch để hiểu sâu hơn
 
 Vài thí nghiệm nhỏ, làm xong nhớ hoàn tác:
 
@@ -253,10 +401,13 @@ Vài thí nghiệm nhỏ, làm xong nhớ hoàn tác:
 4. **Thêm `console.log(req.method, req.url)` vào đầu `app.ts` dưới dạng `app.use((req,res,next)=>{...; next()})`** → tự viết một middleware ghi log đầu tiên trong đời.
 5. **Gọi `curl http://localhost:3000/api/todos/abc`** → xem zod chặn lại và trả 400 kèm mô tả, chứ không phải 500.
 6. **Tắt Postgres (`docker compose stop`) rồi gọi API** → xem nhánh 500 của `errorHandler` hoạt động, và stack trace hiện trong terminal chứ không lộ ra cho khách.
+7. **Xoá dòng `router.use(requireAuth)` trong `todo.routes.ts`** → gọi `curl http://localhost:3000/api/todos` không kèm token. Bạn sẽ thấy lỗi 401 từ `getUserId()` trong controller thay vì dữ liệu — đó là lớp phòng thủ thứ hai đang làm việc.
+8. **Đăng ký hai tài khoản, mỗi tài khoản tạo vài todo, rồi lấy `id` todo của tài khoản A đem gọi bằng token của tài khoản B** → nhận 404 chứ không phải 403. Đọc lại phần giải thích trong `todo.service.ts` để hiểu vì sao 404 mới là câu trả lời đúng.
+9. **Trong `todo.service.ts`, đổi `findFirst({ where: { id, userId } })` thành `findUnique({ where: { id } })`** → làm lại thí nghiệm 8 và xem lỗ hổng IDOR xuất hiện ngay trước mắt. Nhớ hoàn tác.
 
 ---
 
-## 12. Đọc thêm
+## 13. Đọc thêm
 
 - Express: <https://expressjs.com/en/guide/routing.html> và trang "Writing middleware" — hai trang đủ để nắm 90% Express.
 - Prisma: <https://www.prisma.io/docs/orm/prisma-client/queries/crud> — danh sách đầy đủ `findMany`, `create`, `update`...
