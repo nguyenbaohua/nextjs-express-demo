@@ -106,7 +106,20 @@ export default async function proxy(request: NextRequest) {
    */
   if (refreshToken && rawUser) {
     try {
-      const user = JSON.parse(rawUser) as { username: string };
+      /*
+       * Đọc thêm `provider` bên cạnh `username`.
+       *
+       * Từ khi có đăng nhập bằng Google, hệ thống có hai loại phiên và mỗi loại
+       * gia hạn theo một đường khác nhau. Backend cần biết nhãn này để chọn đúng
+       * đường — xem `backend/src/controllers/auth.controller.ts`.
+       *
+       * `provider` có thể `undefined` với cookie được tạo TRƯỚC khi tính năng
+       * Google ra đời. Backend hiểu thiếu nhãn nghĩa là "cognito", nên những
+       * người đang đăng nhập sẵn không bị đá ra ngoài sau khi bạn cập nhật code.
+       * Chi tiết nhỏ nhưng là khác biệt giữa một bản cập nhật êm ru và một bản
+       * cập nhật khiến toàn bộ người dùng phải đăng nhập lại.
+       */
+      const user = JSON.parse(rawUser) as { username: string; provider?: "cognito" | "google" };
 
       /*
        * Gọi thẳng backend bằng `fetch` thay vì dùng `api.refreshSession()`.
@@ -124,7 +137,11 @@ export default async function proxy(request: NextRequest) {
       const res = await fetch(`${baseUrl}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken, username: user.username }),
+        body: JSON.stringify({
+          refreshToken,
+          username: user.username,
+          provider: user.provider,
+        }),
         cache: "no-store",
       });
 
@@ -242,6 +259,30 @@ export default async function proxy(request: NextRequest) {
  * quên kiểu đó thì không ai phát hiện ra. Chặn tất cả rồi mở ra vài ngoại lệ thì
  * an toàn hơn hẳn.
  */
+/*
+ * ⚠️ CHÚ Ý DÒNG `api/` MỚI ĐƯỢC THÊM VÀO DANH SÁCH LOẠI TRỪ.
+ *
+ * Nó tồn tại vì Route Handler `/api/auth/callback/google` — nơi Cognito trả người
+ * dùng về sau khi đăng nhập Google.
+ *
+ * Không loại trừ thì chuyện gì xảy ra? Lúc Cognito chuyển hướng về đó, người dùng
+ * CHƯA có cookie phiên (đăng nhập chưa hoàn tất mà — chính route đó mới là chỗ
+ * hoàn tất nó). Proxy thấy "chưa đăng nhập, mà đường dẫn không nằm trong
+ * PUBLIC_ROUTES" nên đá thẳng về /login, kèm theo cả `code` bị vứt đi.
+ *
+ * Kết quả: bấm nút Google, đi một vòng qua Google, rồi quay về đúng trang đăng
+ * nhập ban đầu — không lỗi, không thông báo, chỉ đơn giản là không đăng nhập
+ * được. Loại bug khiến người ta ngồi soi cấu hình AWS hàng giờ trong khi nguyên
+ * nhân nằm ở một dòng regex.
+ *
+ * Vì sao loại trừ CẢ `api/` chứ không chỉ riêng đường dẫn callback?
+ *   Vì proxy này là lớp bảo vệ TRANG (đá người chưa đăng nhập về /login). Route
+ *   Handler thì không phải trang — nó là endpoint HTTP và phải tự lo phần kiểm
+ *   tra của mình, giống hệt cách backend Express tự kiểm token bằng `requireAuth`.
+ *   Bắt endpoint đi qua một bộ lọc dành cho trang là ghép nhầm hai thứ khác loại.
+ */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

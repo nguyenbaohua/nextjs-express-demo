@@ -243,6 +243,18 @@ Muốn nhìn tận mắt: vào Console → User Pool → tab **Users**, bạn s�
 
 ---
 
-## 9. Dọn dẹp khi học xong
+## 9. Bước tiếp theo: đăng nhập bằng Google
+
+Xong tài liệu này là bạn có luồng đăng nhập bằng email + mật khẩu. App còn hỗ trợ **đăng nhập bằng Google**, và luồng đó xây tiếp lên trên đúng User Pool bạn vừa tạo.
+
+Điểm đáng chú ý: với đăng nhập liên kết (federated), **đăng nhập và đăng ký là một**. Lần đầu người dùng bấm nút Google, Cognito không tìm thấy ai ứng với tài khoản đó nên **tự tạo user mới** trong User Pool — bạn không phải viết dòng code đăng ký nào. Vào tab **Users** sẽ thấy một user tên dạng `Google_115482...`.
+
+Cần thêm ba việc: tạo một Hosted UI domain, lấy cặp key ở Google Cloud Console, và nối hai bên lại trong Cognito.
+
+👉 **Hướng dẫn đầy đủ: [google-login-setup.md](google-login-setup.md)** (khoảng 20–30 phút, miễn phí).
+
+---
+
+## 10. Dọn dẹp khi học xong
 
 Cognito miễn phí ở mức sử dụng của dự án học nên **không cần** xoá gấp. Nếu vẫn muốn dọn: User pools → chọn pool → **Delete**. Thao tác này xoá luôn toàn bộ tài khoản trong đó và **không hoàn tác được**.

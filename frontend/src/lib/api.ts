@@ -23,7 +23,7 @@
 
 import { getAccessToken } from "./auth";
 import { DEFAULT_API_BASE_URL } from "./constants";
-import type { ApiResponse, AuthSession, SessionUser, Todo } from "./types";
+import type { ApiResponse, AuthProvider, AuthSession, SessionUser, Todo } from "./types";
 
 /*
  * Đọc cấu hình MỘT LẦN khi module được nạp, thay vì đọc lại mỗi request.
@@ -297,10 +297,65 @@ export function login(email: string, password: string) {
  * Response KHÔNG chứa refresh token mới: refresh token cũ vẫn dùng tiếp cho tới
  * khi hết hạn 30 ngày, nên nơi gọi phải giữ nguyên nó, đừng ghi đè.
  */
-export function refreshSession(refreshToken: string, username: string) {
+export function refreshSession(
+  refreshToken: string,
+  username: string,
+  /*
+   * Phiên đăng nhập bằng Google gia hạn theo một đường khác (endpoint OAuth thay
+   * vì InitiateAuth), nên backend cần biết nhãn này để chọn đúng đường.
+   *
+   * Để tuỳ chọn: vắng mặt thì backend hiểu là "cognito" — đúng với luồng email +
+   * mật khẩu vốn có từ đầu.
+   */
+  provider?: AuthProvider,
+) {
   return publicRequest<{ accessToken: string; expiresIn: number }>("/auth/refresh", {
     method: "POST",
-    body: JSON.stringify({ refreshToken, username }),
+    body: JSON.stringify({ refreshToken, username, provider }),
+  });
+}
+
+/*
+ * ============================================================================
+ * HAI API CỦA LUỒNG ĐĂNG NHẬP BẰNG GOOGLE
+ * ============================================================================
+ *
+ * Cả hai đều dùng `publicRequest` — hiển nhiên, vì chúng chính là cửa để lấy
+ * token cho người CHƯA có token.
+ */
+
+/**
+ * Xin URL Hosted UI để đá người dùng sang Google.
+ *
+ * Chú ý cách dựng query string: dùng `URLSearchParams` chứ không nối chuỗi tay.
+ * `redirectUri` chứa đầy ký tự đặc biệt (`:`, `/`) bắt buộc phải mã hoá, quên là
+ * backend nhận được một URL cụt.
+ *
+ * Hàm trả về `{ url }` chứ không tự chuyển hướng. Đó là chủ ý: `api.ts` chỉ có
+ * đúng một việc là NÓI CHUYỆN VỚI BACKEND. Chuyển hướng là việc của Server
+ * Action. Trộn hai trách nhiệm vào một hàm sẽ khiến nó không thể tái sử dụng và
+ * cũng không thể viết test.
+ */
+export function getGoogleAuthorizeUrl(redirectUri: string, state: string) {
+  const query = new URLSearchParams({ redirectUri, state });
+  return publicRequest<{ url: string }>(`/auth/google/url?${query.toString()}`);
+}
+
+/**
+ * Đổi `code` mà Cognito trả về lấy bộ ba token.
+ *
+ * Kiểu trả về là `AuthSession` — GIỐNG HỆT hàm `login()` phía trên. Nhờ vậy Route
+ * Handler chỉ việc `saveSession(session)` y như luồng đăng nhập thường, không cần
+ * một dòng code riêng nào cho Google.
+ *
+ * `redirectUri` phải trùng khít với chuỗi đã gửi ở bước xin URL. Cognito đối
+ * chiếu hai giá trị này để chắc rằng người đổi `code` cũng chính là người đã xin
+ * `code` — xem giải thích trong `backend/src/services/auth.service.ts`.
+ */
+export function loginWithGoogle(code: string, redirectUri: string) {
+  return publicRequest<AuthSession>("/auth/google/callback", {
+    method: "POST",
+    body: JSON.stringify({ code, redirectUri }),
   });
 }
 

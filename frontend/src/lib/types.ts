@@ -72,6 +72,19 @@ export type FormState = { error: string } | null;
  */
 
 /**
+ * "Người dùng này đăng nhập bằng cách nào?"
+ *
+ *   "cognito" — email + mật khẩu, luồng có sẵn từ đầu dự án
+ *   "google"  — bấm nút Google, đi qua Hosted UI của Cognito
+ *
+ * Nhãn này KHÔNG phải để hiển thị cho đẹp. Nó quyết định đường gia hạn token:
+ * hai luồng dùng hai API khác nhau của Cognito (xem `backend/src/services/
+ * auth.service.ts`). Chọn nhầm đường thì đúng một giờ sau khi đăng nhập, người
+ * dùng bị đá ra ngoài — một loại bug rất khó lần vì nó không xảy ra ngay.
+ */
+export type AuthProvider = "cognito" | "google";
+
+/**
  * Thông tin người dùng lấy từ Cognito, đủ để hiển thị và để gia hạn token.
  */
 export type SessionUser = {
@@ -91,6 +104,18 @@ export type SessionUser = {
    * `backend/src/services/auth.service.ts`, hàm `refreshTokens`.
    */
   username: string;
+  /**
+   * Nguồn gốc của phiên đăng nhập.
+   *
+   * `?` (tuỳ chọn) vì lý do rất đời thường: cookie của những người đã đăng nhập
+   * TỪ TRƯỚC khi tính năng Google ra đời không có trường này. Nếu bắt buộc, họ sẽ
+   * bị lỗi ngay lần gia hạn kế tiếp dù chẳng làm gì sai.
+   *
+   * Vắng mặt thì hiểu là `"cognito"` — đúng, vì trước đây chỉ có một luồng duy
+   * nhất. Đây là kỹ thuật thường gặp khi mở rộng dữ liệu đã tồn tại sẵn: THÊM
+   * trường tuỳ chọn có giá trị mặc định hợp lý, đừng bắt dữ liệu cũ phải đổi theo.
+   */
+  provider?: AuthProvider;
 };
 
 /**

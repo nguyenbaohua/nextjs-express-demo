@@ -22,12 +22,14 @@ import { useActionState } from "react";
 import { loginAction } from "@/lib/auth-actions";
 import { ROUTES } from "@/lib/constants";
 import buttonStyles from "./button.module.css";
+import GoogleLoginButton from "./GoogleLoginButton";
 import styles from "./AuthForm.module.css";
 
 export default function LoginForm({
   defaultEmail,
   justConfirmed,
   nextPath,
+  googleError,
 }: {
   /** Email điền sẵn — có khi người dùng vừa xác thực xong và được chuyển sang đây. */
   defaultEmail?: string;
@@ -35,6 +37,21 @@ export default function LoginForm({
   justConfirmed?: boolean;
   /** Trang người dùng định vào trước khi bị đá về đây. Đăng nhập xong sẽ quay lại đó. */
   nextPath?: string;
+  /**
+   * Câu báo lỗi của luồng đăng nhập Google, nếu vừa có một lượt thất bại.
+   *
+   * Vì sao lỗi này đến từ PROP mà không nằm trong `state` của `useActionState`?
+   *
+   *   Vì `useActionState` chỉ giữ kết quả của action gắn với form NÀY, trong
+   *   CHÍNH lần render này. Còn lỗi Google phát sinh ở một request hoàn toàn
+   *   khác (Route Handler `/api/auth/callback/google`), sau khi người dùng đã đi
+   *   một vòng qua Google rồi quay về. Tới lúc trang này render lại thì component
+   *   đã bị huỷ và dựng mới từ đầu — mọi state của React đã bay sạch.
+   *
+   *   Thứ duy nhất sống sót qua một lần chuyển trang là URL và cookie. Nên lỗi
+   *   được truyền qua `?error=` trên URL, trang cha đọc ra rồi đưa xuống đây.
+   */
+  googleError?: string;
 }) {
   /*
    * `useActionState` nối form với Server Action và trả về ba thứ:
@@ -59,6 +76,17 @@ export default function LoginForm({
       {justConfirmed ? (
         <p className={styles.success} style={{ marginBottom: 16 }}>
           Xác thực email thành công. Bạn có thể đăng nhập ngay.
+        </p>
+      ) : null}
+
+      {/*
+        Lỗi của luồng Google hiện Ở TRÊN form, tách khỏi ô báo lỗi của form bên
+        dưới. Chủ ý: hai lỗi này thuộc về hai hành động khác nhau, đặt chung một
+        chỗ sẽ khiến người dùng tưởng mình vừa nhập sai email hoặc mật khẩu.
+      */}
+      {googleError ? (
+        <p className={styles.error} style={{ marginBottom: 16 }} role="alert">
+          {googleError}
         </p>
       ) : null}
 
@@ -146,6 +174,13 @@ export default function LoginForm({
           {isPending ? "Đang đăng nhập..." : "Đăng nhập"}
         </button>
       </form>
+
+      {/*
+        Nút Google nằm NGOÀI thẻ <form> phía trên, và bắt buộc phải vậy: HTML
+        không cho phép lồng form trong form. Bản thân `GoogleLoginButton` đã có
+        <form> riêng trỏ tới một Server Action khác.
+      */}
+      <GoogleLoginButton nextPath={nextPath} />
 
       <p className={styles.footer}>
         Chưa có tài khoản?{" "}

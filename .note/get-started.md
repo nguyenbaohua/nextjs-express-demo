@@ -53,6 +53,22 @@ COGNITO_CLIENT_SECRET=
 
 👉 **Cách lấy từng giá trị trong AWS Console: xem [cognito-setup.md](cognito-setup.md).** Tài liệu đó viết cho người chưa từng dùng Cognito, khoảng 10–15 phút là xong và không tốn phí.
 
+### Đăng nhập bằng Google (tuỳ chọn)
+
+App còn có nút **"Đăng nhập bằng Google"**. Tính năng này cần thêm hai biến nữa:
+
+```
+# backend/.env
+COGNITO_DOMAIN=
+
+# frontend/.env.local
+APP_BASE_URL=http://localhost:3001
+```
+
+Bỏ trống `COGNITO_DOMAIN` thì mọi thứ khác **vẫn chạy bình thường** — chỉ riêng nút Google báo lỗi khi bấm.
+
+👉 **Cách lấy key ở Google Cloud Console và nối với Cognito: xem [google-login-setup.md](google-login-setup.md).** Khoảng 20–30 phút, cũng miễn phí. Đăng nhập bằng Google sẽ **tự động tạo người dùng mới trong Cognito** ở lần đầu, không cần bước đăng ký riêng.
+
 ## 4. Khởi động database bằng Docker
 
 Project đã có sẵn `docker-compose.yml` để dựng một container PostgreSQL trống.
@@ -136,6 +152,7 @@ cd backend
 npm install
 cp .env.example .env
 # Điền DATABASE_URL và 4 biến Cognito vào .env — xem cognito-setup.md
+# (muốn có nút đăng nhập Google thì điền thêm COGNITO_DOMAIN — xem google-login-setup.md)
 docker compose up -d
 npm run prisma:generate
 npm run prisma:migrate

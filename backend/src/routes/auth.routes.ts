@@ -52,6 +52,25 @@ router.post("/login", authController.login);
  */
 router.post("/refresh", authController.refresh);
 
+/*
+ * ---------- Đăng nhập bằng Google (OAuth 2.0) ----------
+ *
+ * Hai route này cũng nằm ở nhóm CÔNG KHAI, và vì đúng cái lý do đã nói ở đầu
+ * file: chúng là cửa để người CHƯA có token đi vào. Bắt phải đăng nhập mới được
+ * gọi API đăng nhập thì lại thành con gà và quả trứng.
+ *
+ * Điểm cần chú ý: cả hai đều được gọi bởi SERVER Next.js, không phải bởi trình
+ * duyệt. Trình duyệt chỉ nói chuyện với Next.js và với Cognito — nó không bao giờ
+ * gọi thẳng cổng 3000. Nhờ vậy `code` và token không bao giờ lộ ra tầng script
+ * của trang web.
+ */
+
+/** GET /api/auth/google/url — xin URL Hosted UI để đá người dùng sang Google */
+router.get("/google/url", authController.googleAuthorizeUrl);
+
+/** POST /api/auth/google/callback — đổi `code` Cognito trả về lấy 3 token */
+router.post("/google/callback", authController.googleCallback);
+
 /* ---------- NHÓM CẦN TOKEN: mọi route dưới đây đều qua requireAuth ---------- */
 
 /**

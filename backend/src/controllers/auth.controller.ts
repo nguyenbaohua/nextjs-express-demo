@@ -21,6 +21,8 @@ import { NextFunction, Request, Response } from "express";
 import * as authService from "../services/auth.service";
 import {
   confirmSchema,
+  googleAuthorizeUrlSchema,
+  googleCallbackSchema,
   loginSchema,
   refreshSchema,
   registerSchema,
@@ -95,19 +97,108 @@ export async function login(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/*
+ * POST /api/auth/refresh — gia hạn phiên đăng nhập.
+ *
+ * Đây là chỗ DUY NHẤT trong controller phải phân biệt hai loại phiên. Lý do rất
+ * cụ thể: Cognito cung cấp hai đường gia hạn khác nhau, và mỗi loại phiên chỉ đi
+ * được đúng một đường (xem `auth.service.ts` để hiểu vì sao).
+ *
+ * Nhìn kỹ sẽ thấy đây là ví dụ đẹp về việc controller làm ĐÚNG PHẦN VIỆC CỦA NÓ:
+ * nó chỉ ĐIỀU PHỐI — đọc dữ liệu vào rồi chọn gọi hàm nào. Toàn bộ hiểu biết về
+ * "gia hạn thế nào" vẫn nằm trong service. Controller không hề biết Hosted UI
+ * hay SECRET_HASH là cái gì.
+ */
 export async function refresh(req: Request, res: Response, next: NextFunction) {
   try {
-    const { refreshToken } = refreshSchema.parse(req.body);
+    const { refreshToken, provider, username } = refreshSchema.parse(req.body);
+
     /*
+     * Nhánh Google: gọn hơn hẳn vì endpoint /oauth2/token không đòi username.
+     * Thoát sớm bằng `return` để phần dưới khỏi phải lồng thêm một tầng `else`.
+     */
+    if (provider === "google") {
+      const result = await authService.refreshTokensWithHostedUi(refreshToken);
+      res.json({ success: true, data: result });
+      return;
+    }
+
+    /*
+     * Nhánh email + mật khẩu (mặc định khi `provider` vắng mặt — xem lời giải
+     * thích về tương thích ngược trong `auth.schema.ts`).
+     *
      * `username` là tên đăng nhập thật trong Cognito, cần để tính SECRET_HASH.
      * Xem lời giải thích dài trong `auth.service.ts` — đây là cái bẫy khó chịu
      * nhất của luồng refresh.
      */
-    const username = String(req.body?.username ?? "").trim();
     if (!username) {
       throw new AppError(400, "Thiếu username để làm mới phiên đăng nhập.");
     }
     const result = await authService.refreshTokens(refreshToken, username);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/*
+ * ============================================================================
+ * HAI ROUTE CỦA LUỒNG ĐĂNG NHẬP BẰNG GOOGLE
+ * ============================================================================
+ *
+ * Luồng OAuth có hai chặng tách rời nhau, cách nhau vài giây và vài lần chuyển
+ * trang, nên cần đúng hai endpoint:
+ *
+ *   1. `googleAuthorizeUrl` — "cho tôi xin cái địa chỉ để đá người dùng đi"
+ *      (chạy TRƯỚC khi người dùng rời khỏi app)
+ *
+ *   2. `googleCallback` — "đây là tấm phiếu họ mang về, đổi giúp tôi lấy token"
+ *      (chạy SAU khi người dùng quay lại)
+ *
+ * Giữa hai lời gọi đó, người dùng đã đi một vòng qua Cognito và Google. Server
+ * của ta không giữ trạng thái gì trong lúc đó cả — thứ nối hai chặng lại với
+ * nhau là `state` nằm trong cookie của trình duyệt.
+ */
+
+/**
+ * GET /api/auth/google/url?redirectUri=...&state=...
+ *
+ * Trả về URL Hosted UI để frontend chuyển hướng người dùng tới.
+ *
+ * Vì sao là GET mà không phải POST? Vì nó KHÔNG thay đổi gì cả — chỉ nối chuỗi
+ * rồi trả về. Đó đúng định nghĩa của một request "an toàn" (safe) trong HTTP.
+ * Dùng đúng động từ giúp người đọc code đoán được hành vi mà không cần mở ra xem.
+ *
+ * Chú ý ta parse `req.query` chứ không phải `req.body`: request GET không có
+ * body, dữ liệu nằm trên URL sau dấu `?`.
+ */
+export async function googleAuthorizeUrl(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { redirectUri, state } = googleAuthorizeUrlSchema.parse(req.query);
+    const url = authService.buildGoogleAuthorizeUrl(redirectUri, state);
+    res.json({ success: true, data: { url } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/auth/google/callback
+ *
+ * Đổi `code` (tấm phiếu dùng-một-lần từ Cognito) lấy bộ ba token.
+ *
+ * Response có cấu trúc GIỐNG HỆT `POST /api/auth/login`. Đó là chủ ý thiết kế:
+ * frontend nhận về cùng một hình dạng dữ liệu nên phần lưu cookie dùng chung
+ * được y nguyên, không cần viết thêm nhánh xử lý riêng cho Google.
+ *
+ * Nguyên tắc đáng nhớ: khi thêm một cách làm MỚI cho một việc CŨ, hãy cố cho nó
+ * trả về cùng kiểu dữ liệu với cách cũ. Chỗ khác biệt càng ít thì code càng ít
+ * chỗ phải rẽ nhánh.
+ */
+export async function googleCallback(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { code, redirectUri } = googleCallbackSchema.parse(req.body);
+    const result = await authService.loginWithGoogle(code, redirectUri);
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);

@@ -16,6 +16,7 @@ import { useActionState } from "react";
 import { registerAction } from "@/lib/auth-actions";
 import { ROUTES } from "@/lib/constants";
 import buttonStyles from "./button.module.css";
+import GoogleLoginButton from "./GoogleLoginButton";
 import styles from "./AuthForm.module.css";
 
 export default function RegisterForm() {
@@ -101,6 +102,24 @@ export default function RegisterForm() {
           {isPending ? "Đang tạo tài khoản..." : "Đăng ký"}
         </button>
       </form>
+
+      {/*
+        Cũng chính là nút ở trang đăng nhập, không sửa gì cả.
+
+        Nghe lạ: sao trang ĐĂNG KÝ lại đặt nút "Đăng NHẬP bằng Google"?
+
+        Vì với đăng nhập liên kết (federated), HAI VIỆC ĐÓ LÀ MỘT. Lần đầu người
+        dùng bấm nút này, Cognito không tìm thấy ai ứng với tài khoản Google đó
+        nên TỰ TẠO một user mới trong User Pool — tức là đăng ký. Những lần sau,
+        vẫn cái nút đó, nhưng Cognito dùng lại user cũ — tức là đăng nhập.
+
+        Chính vì vậy chuẩn OAuth không hề có khái niệm "đăng ký", chỉ có "cấp
+        quyền". Và cũng vì vậy mà đăng nhập bằng mạng xã hội tiện đến thế: người
+        dùng không phải nghĩ xem mình đã có tài khoản hay chưa, không phải nhớ
+        thêm mật khẩu nào, và không có bước xác thực email — Google đã xác thực
+        hộ rồi.
+      */}
+      <GoogleLoginButton />
 
       <p className={styles.footer}>
         Đã có tài khoản?{" "}

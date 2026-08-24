@@ -16,6 +16,7 @@
  */
 
 import LoginForm from "@/components/LoginForm";
+import { getGoogleLoginErrorMessage } from "@/lib/oauth";
 import styles from "@/components/AuthForm.module.css";
 
 export default async function LoginPage(props: PageProps<"/login">) {
@@ -48,9 +49,32 @@ export default async function LoginPage(props: PageProps<"/login">) {
    */
   const justConfirmed = searchParams.confirmed === "1";
 
+  /*
+   * `?error=...` do Route Handler `/api/auth/callback/google` gắn vào khi luồng
+   * đăng nhập Google thất bại.
+   *
+   * 🔒 Để ý: trên URL chỉ có MÃ LỖI (ví dụ `google_state`), không phải câu thông
+   * báo. Trang này tra mã đó ra câu tiếng Việt tương ứng.
+   *
+   * Vì sao không truyền thẳng câu thông báo cho nhanh? Vì mọi thứ trên URL đều do
+   * người dùng sửa được: kẻ xấu sẽ gửi cho nạn nhân một link kiểu
+   * `/login?error=Tài khoản bị khoá, gọi 0900xxx để mở` — và câu lừa đảo đó hiện
+   * ra trên đúng website thật của bạn, trong đúng khung cảnh báo màu đỏ.
+   *
+   * Truyền mã thì kẻ tấn công chỉ chọn được một trong vài câu DO BẠN VIẾT SẴN, và
+   * mã lạ thì không hiện gì cả. Xem giải thích đầy đủ trong `lib/oauth.ts`.
+   */
+  const googleErrorCode = typeof searchParams.error === "string" ? searchParams.error : undefined;
+  const googleError = getGoogleLoginErrorMessage(googleErrorCode);
+
   return (
     <main className={styles.page}>
-      <LoginForm defaultEmail={email} justConfirmed={justConfirmed} nextPath={nextPath} />
+      <LoginForm
+        defaultEmail={email}
+        justConfirmed={justConfirmed}
+        nextPath={nextPath}
+        googleError={googleError}
+      />
     </main>
   );
 }

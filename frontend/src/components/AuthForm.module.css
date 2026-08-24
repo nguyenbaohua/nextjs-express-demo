@@ -151,3 +151,58 @@
   color: var(--muted);
   cursor: default;
 }
+
+/*
+ * ----------------------------------------------------------------------------
+ * KHU VỰC ĐĂNG NHẬP BẰNG GOOGLE
+ * ----------------------------------------------------------------------------
+ */
+
+.googleSection {
+  margin-top: 20px;
+}
+
+/*
+ * Vạch ngăn có chữ "hoặc" nằm giữa.
+ *
+ * Mẹo dựng: dùng flexbox, rồi cho hai phần tử giả `::before` và `::after` mỗi
+ * cái chiếm một nửa chiều ngang (`flex: 1`) và vẽ thành một đường kẻ 1px.
+ *
+ * Vì sao không dùng thẻ `<hr>` cho nhanh? Vì `<hr>` mang ý nghĩa NGỮ NGHĨA là
+ * "chuyển chủ đề" trong tài liệu, và trình đọc màn hình sẽ thông báo nó. Ở đây
+ * ta chỉ cần một hiệu ứng thị giác thuần tuý, nên dùng phần tử giả của CSS là
+ * đúng vai hơn: chúng không tồn tại trong cây nội dung của trang.
+ */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.divider::before,
+.divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  /*
+   * `content: ""` là BẮT BUỘC. Thiếu nó thì phần tử giả không được tạo ra và
+   * đường kẻ đơn giản là không xuất hiện — một trong những lỗi CSS khiến người
+   * mới mất nhiều thời gian nhất, vì trình duyệt không báo gì cả.
+   */
+  content: "";
+}
+
+/*
+ * Nút Google chiếm trọn chiều ngang cho cân với nút "Đăng nhập" phía trên.
+ *
+ * Nó dùng kiểu nền trung tính (`.button` mặc định) chứ KHÔNG dùng `.primary`
+ * màu nổi bật. Chủ ý về mặt thiết kế: mỗi màn hình chỉ nên có MỘT hành động
+ * chính. Tô đậm cả hai nút thì mắt người dùng không biết nhìn vào đâu, và trớ
+ * trêu là như vậy còn khó chọn hơn là chỉ nhấn mạnh một cái.
+ */
+.googleButton {
+  width: 100%;
+}

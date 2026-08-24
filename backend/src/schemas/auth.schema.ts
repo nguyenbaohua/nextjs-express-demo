@@ -85,6 +85,86 @@ export const resendCodeSchema = z.object({
   email: emailSchema,
 });
 
+/*
+ * ----------------------------------------------------------------------------
+ * NHÃN "PHIÊN NÀY ĐẾN TỪ ĐÂU"
+ * ----------------------------------------------------------------------------
+ *
+ * Từ khi có đăng nhập bằng Google, hệ thống có HAI loại phiên, và mỗi loại gia
+ * hạn token theo một cách khác nhau (xem `auth.service.ts`):
+ *
+ *   "cognito" — đăng nhập bằng email + mật khẩu → gia hạn qua InitiateAuth
+ *   "google"  — đăng nhập qua Hosted UI         → gia hạn qua /oauth2/token
+ *
+ * `z.enum` chỉ chấp nhận đúng hai chuỗi này. Gửi lên "facebook" là bị từ chối
+ * ngay tại cửa, không lọt vào tới service — đúng tinh thần "không tin dữ liệu từ
+ * client" đã nói ở đầu file.
+ */
+export const authProviderSchema = z.enum(["cognito", "google"]);
+
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1, "Thiếu refresh token"),
+  /*
+   * `.optional()` vì lý do rất thực tế: những người đang đăng nhập TỪ TRƯỚC khi
+   * tính năng Google được thêm vào có cookie phiên không hề chứa trường này. Bắt
+   * buộc phải có sẽ đá toàn bộ họ ra ngoài ngay lần gia hạn kế tiếp.
+   *
+   * Thiếu thì controller hiểu mặc định là "cognito" — đúng, vì trước đây chỉ có
+   * đúng một luồng đó.
+   *
+   * Bài học chung: mỗi khi thêm một trường BẮT BUỘC vào dữ liệu đã tồn tại sẵn
+   * ngoài thực tế, hãy nghĩ tới những bản ghi cũ chưa có trường đó.
+   */
+  provider: authProviderSchema.optional(),
+  /*
+   * `username` chỉ cần cho luồng "cognito". Việc kiểm tra "thiếu username khi
+   * provider là cognito" nằm ở controller chứ không ở đây, vì zod diễn tả ràng
+   * buộc kiểu "trường A bắt buộc TUỲ THEO giá trị trường B" khá rườm rà, mà
+   * một câu `if` ở controller thì ai đọc cũng hiểu ngay.
+   */
+  username: z.string().trim().min(1).optional(),
+});
+
+/*
+ * ----------------------------------------------------------------------------
+ * SCHEMA CHO LUỒNG ĐĂNG NHẬP BẰNG GOOGLE
+ * ----------------------------------------------------------------------------
+ */
+
+/*
+ * `redirectUri` do frontend gửi lên, nên về nguyên tắc là dữ liệu KHÔNG ĐÁNG TIN.
+ *
+ * Ta chỉ kiểm hình thức tối thiểu (phải là URL http/https) chứ không cố kiểm
+ * "URL này có phải của mình không". Vì sao dừng lại ở đó?
+ *
+ *   Vì Cognito mới là người gác cổng thật: nó đối chiếu `redirect_uri` với danh
+ *   sách "Allowed callback URLs" mà bạn khai trong AWS Console, và từ chối thẳng
+ *   nếu không khớp. Viết thêm một lớp kiểm tra ở đây chỉ tạo ra hai bộ luật có
+ *   thể lệch nhau — đúng cái bẫy đã nói ở phần `passwordSchema` phía trên.
+ *
+ * `z.url()` là cú pháp của zod v4 (bản trước viết là `z.string().url()`).
+ */
+const redirectUriSchema = z
+  .url("redirectUri không hợp lệ")
+  .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
+    message: "redirectUri phải bắt đầu bằng http:// hoặc https://",
+  });
+
+/** GET /api/auth/google/url — xin URL để đá người dùng sang Google. */
+export const googleAuthorizeUrlSchema = z.object({
+  redirectUri: redirectUriSchema,
+  /*
+   * Chuỗi ngẫu nhiên chống CSRF do frontend sinh ra.
+   *
+   * Đặt sàn 8 ký tự để chặn kiểu gọi ẩu `state=1` — một `state` đoán được thì
+   * cũng như không có. Backend không sinh `state` hộ được, vì người phải CẤT nó
+   * vào cookie và ĐỐI CHIẾU lúc quay về là frontend.
+   */
+  state: z.string().trim().min(8, "state quá ngắn"),
+});
+
+/** POST /api/auth/google/callback — đổi `code` lấy token. */
+export const googleCallbackSchema = z.object({
+  code: z.string().trim().min(1, "Thiếu authorization code"),
+  redirectUri: redirectUriSchema,
 });

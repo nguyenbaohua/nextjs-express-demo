@@ -29,8 +29,9 @@
 
 import { redirect } from "next/navigation";
 import * as api from "./api";
-import { clearSession, saveSession } from "./auth";
+import { clearSession, saveOAuthState, saveSession } from "./auth";
 import { ROUTES } from "./constants";
+import { createOAuthState, GOOGLE_LOGIN_ERROR_CODES, GOOGLE_REDIRECT_URI } from "./oauth";
 import type { AuthFormState } from "./types";
 
 /*
@@ -224,6 +225,93 @@ export async function loginAction(
 
   // Về đúng trang người dùng định vào lúc bị chặn (đã lọc ở `safeRedirectPath`).
   redirect(nextPath);
+}
+
+/**
+ * Bắt đầu luồng đăng nhập bằng Google — NỬA ĐẦU của câu chuyện.
+ *
+ * ----------------------------------------------------------------------------
+ * ĐIỀU LẠ NHẤT CỦA HÀM NÀY: NÓ KHÔNG ĐĂNG NHẬP AI CẢ
+ * ----------------------------------------------------------------------------
+ *
+ * Đọc tên hàm dễ tưởng nó làm việc đăng nhập. Không hề. Nó chỉ chuẩn bị hành lý
+ * rồi tiễn người dùng ra cửa:
+ *
+ *   1. Sinh một chuỗi `state` ngẫu nhiên
+ *   2. Cất `state` + nơi cần quay về vào cookie tạm
+ *   3. Hỏi backend "cho tôi xin URL Hosted UI"
+ *   4. `redirect()` — người dùng rời khỏi website của bạn
+ *
+ * Việc đăng nhập thật sự xảy ra ở NỬA SAU, tại Route Handler
+ * `app/api/auth/callback/google/route.ts`, vài chục giây sau, khi người dùng
+ * quay về. Hai nửa đó là hai request HTTP hoàn toàn tách biệt, không dùng chung
+ * biến nào, không dùng chung bộ nhớ nào.
+ *
+ * Đây chính là điểm khiến OAuth khó hình dung lúc mới học: một "hành động" của
+ * người dùng bị cắt làm đôi bởi một chuyến đi vòng qua hai website khác. Nếu bạn
+ * thấy rối, hãy nhớ: KHÔNG có gì nối hai nửa đó ngoài cái cookie ở bước 2.
+ *
+ * So sánh cho rõ:
+ *
+ *   `loginAction` (email + mật khẩu)  — một request, xong việc ngay trong hàm.
+ *   `loginWithGoogleAction`           — mở đầu một hành trình, kết thúc ở nơi khác.
+ */
+export async function loginWithGoogleAction(formData: FormData) {
+  /*
+   * Lọc `next` bằng đúng hàm `safeRedirectPath` mà `loginAction` dùng.
+   *
+   * Vì sao lọc NGAY BÂY GIỜ mà không đợi lúc quay về?
+   *   Vì lọc sớm thì thứ được cất vào cookie đã là dữ liệu SẠCH. Nửa sau của
+   *   luồng cứ thế dùng, không phải kiểm lại và cũng không có cơ hội quên kiểm.
+   *
+   * Nguyên tắc: LÀM SẠCH DỮ LIỆU NGAY TẠI CỬA VÀO, đừng để dữ liệu bẩn đi sâu
+   * vào trong hệ thống rồi mới xử lý — vì càng đi sâu càng nhiều nhánh, và chỉ
+   * cần một nhánh quên kiểm là thủng.
+   */
+  const nextPath = safeRedirectPath(String(formData.get("next") ?? ""));
+
+  /*
+   * Sinh `state` và cất vào cookie TRƯỚC KHI gọi backend.
+   *
+   * Thứ tự này quan trọng: nếu gọi backend trước rồi mới ghi cookie, mà giữa hai
+   * bước đó có lỗi xảy ra, ta sẽ chuyển hướng người dùng đi với một `state` mà
+   * chính ta không nhớ — họ quay về sẽ bị từ chối một cách bí ẩn.
+   *
+   * Ghi cookie trước thì tình huống xấu nhất chỉ là một cookie thừa nằm đó 10
+   * phút rồi tự hết hạn. Vô hại.
+   */
+  const state = createOAuthState();
+  await saveOAuthState({ state, next: nextPath });
+
+  let authorizeUrl: string;
+  try {
+    const result = await api.getGoogleAuthorizeUrl(GOOGLE_REDIRECT_URI, state);
+    authorizeUrl = result.url;
+  } catch (err) {
+    /*
+     * Thất bại ở đây gần như luôn là lỗi CẤU HÌNH chứ không phải lỗi người dùng:
+     * quên điền `COGNITO_DOMAIN`, hoặc backend chưa chạy. Backend đã soạn sẵn câu
+     * tiếng Việt chỉ rõ nguyên nhân, nên ta hiện thẳng câu đó lên form.
+     *
+     * Hàm này KHÔNG dùng `useActionState` (nó chuyển hướng chứ không trả state về
+     * form), nên đường duy nhất để báo lỗi là đưa người dùng về /login kèm một mã
+     * lỗi trên URL. Xem `oauth.ts` để hiểu vì sao truyền MÃ chứ không truyền câu.
+     */
+    console.error("[google-login] Không lấy được URL đăng nhập:", err);
+    redirect(`${ROUTES.login}?error=${GOOGLE_LOGIN_ERROR_CODES.failed}`);
+  }
+
+  /*
+   * Tạm biệt. Từ giây này người dùng đang ở trên website của Amazon, rồi của
+   * Google. App của ta không biết chuyện gì đang xảy ra với họ cho tới khi họ
+   * quay về `/api/auth/callback/google`.
+   *
+   * ⚠️ Nhắc lại cái bẫy kinh điển đã nói ở đầu file: `redirect()` phải nằm NGOÀI
+   * try/catch, vì nó hoạt động bằng cách ném ra một exception đặc biệt. Gọi nó
+   * bên trong `try` thì `catch` sẽ nuốt mất và chẳng có chuyện chuyển trang nào
+   * xảy ra cả.
+   */
+  redirect(authorizeUrl);
 }
 
 /**

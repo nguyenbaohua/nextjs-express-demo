@@ -37,6 +37,19 @@ export const ROUTES = {
   login: "/login",
   register: "/register",
   confirm: "/confirm",
+  /**
+   * Nơi Cognito trả người dùng về sau khi đăng nhập Google xong.
+   *
+   * Khác mọi route phía trên ở một điểm căn bản: đây KHÔNG phải một trang. Không
+   * có file `page.tsx` nào ứng với nó, và mở bằng tay thì chẳng thấy gì cả. Nó là
+   * một ROUTE HANDLER (file `app/api/auth/callback/google/route.ts`) — một
+   * endpoint HTTP thuần, nhận `code` rồi chuyển hướng đi tiếp.
+   *
+   * ⚠️ Chuỗi này phải TRÙNG TỪNG KÝ TỰ với "Allowed callback URLs" khai trong AWS
+   * Console. Sửa ở đây thì nhớ sửa cả bên đó, nếu không sẽ dính lỗi
+   * `redirect_mismatch`.
+   */
+  googleCallback: "/api/auth/callback/google",
 } as const;
 
 /**
@@ -67,8 +80,23 @@ export const COOKIE = {
   accessToken: "access_token",
   /** Refresh token — dùng để xin access token mới. Sống 30 ngày. */
   refreshToken: "refresh_token",
-  /** Thông tin hiển thị (email, sub, username) dưới dạng JSON. */
+  /** Thông tin hiển thị (email, sub, username, provider) dưới dạng JSON. */
   user: "session_user",
+  /**
+   * Cookie TẠM của luồng đăng nhập Google: giữ chuỗi `state` chống CSRF và
+   * đường dẫn cần quay về sau khi đăng nhập.
+   *
+   * Khác hẳn ba cookie trên ở vòng đời: nó chỉ sống vài phút, đúng bằng khoảng
+   * thời gian người dùng đi một vòng qua Google rồi quay lại, và bị XOÁ NGAY khi
+   * dùng xong. Cookie phiên thì sống 30 ngày.
+   *
+   * Vì sao phải dùng cookie mà không giữ trong bộ nhớ server? Vì giữa lúc gửi đi
+   * và lúc quay về, người dùng đã rời khỏi website của bạn hoàn toàn. Server
+   * không có chỗ nào để nhớ "người vừa bấm nút là ai" — trừ khi tự dựng session
+   * store, mà như thế thì phá vỡ tính không-trạng-thái của cả kiến trúc. Cookie
+   * chính là "bộ nhớ" đi theo trình duyệt.
+   */
+  oauthState: "oauth_state",
 } as const;
 
 /**
@@ -89,3 +117,18 @@ export const TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS = 60;
 
 /** Hạn của cookie refresh token: 30 ngày, khớp với mặc định của Cognito. */
 export const REFRESH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * Hạn của cookie `oauth_state`: 10 phút.
+ *
+ * Con số này là một đánh đổi:
+ *   - Quá ngắn (1 phút) → người dùng phải chọn tài khoản Google, nhập mật khẩu,
+ *     có khi còn nhập cả mã 2FA... chưa xong đã hết hạn và phải làm lại từ đầu.
+ *   - Quá dài (1 ngày) → cửa sổ để kẻ tấn công lợi dụng `state` cũ mở rộng ra
+ *     một cách không cần thiết.
+ *
+ * 10 phút đủ rộng rãi cho người thao tác chậm, mà vẫn đóng lại rất nhanh. Đây là
+ * kiểu đánh đổi bạn sẽ gặp ở mọi giá trị timeout: chọn theo THỜI GIAN THAO TÁC
+ * THẬT của con người, đừng chọn theo số tròn cho đẹp.
+ */
+export const OAUTH_STATE_MAX_AGE_SECONDS = 10 * 60;

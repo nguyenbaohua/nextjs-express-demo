@@ -242,3 +242,138 @@ export const idTokenVerifier = CognitoJwtVerifier.create({
   tokenUse: "id",
   clientId: cognitoConfig.clientId,
 });
+
+/*
+ * ============================================================================
+ * PHẦN DÀNH RIÊNG CHO ĐĂNG NHẬP BẰNG GOOGLE (federated login)
+ * ============================================================================
+ *
+ * ----------------------------------------------------------------------------
+ * Ý TƯỞNG CỐT LÕI — đọc kỹ đoạn này là hiểu toàn bộ tính năng
+ * ----------------------------------------------------------------------------
+ *
+ * Backend của chúng ta KHÔNG nói chuyện trực tiếp với Google. Một dòng code nào
+ * gọi tới `googleapis.com` cũng không có.
+ *
+ * Thay vào đó, ta khai báo Google làm "Identity Provider" (nhà cung cấp danh
+ * tính) NGAY BÊN TRONG Cognito User Pool. Từ đó Cognito đứng ra làm người trung
+ * gian: nó đi hỏi Google, nhận kết quả, rồi phát ra token của CHÍNH NÓ cho ta.
+ *
+ *   Trình duyệt → Cognito Hosted UI → Google → Cognito → app của bạn
+ *
+ * Ba cái lợi rất lớn của cách này:
+ *
+ *   1. Backend chỉ phải biết MỘT nhà cung cấp danh tính là Cognito. Mai này thêm
+ *      Facebook, Apple, GitHub... thì code backend KHÔNG đổi một dòng nào — chỉ
+ *      thêm cấu hình trong AWS Console.
+ *
+ *   2. Token nhận được vẫn là JWT do Cognito ký, y hệt token của luồng email +
+ *      mật khẩu. Nghĩa là `requireAuth`, `accessTokenVerifier`, cột `userId`
+ *      trong database... tất cả dùng lại nguyên xi, không sửa gì.
+ *
+ *   3. 🔴 QUAN TRỌNG NHẤT, và cũng là điều bạn yêu cầu: NGƯỜI DÙNG ĐƯỢC TỰ ĐỘNG
+ *      TẠO TRONG USER POOL ngay lần đầu đăng nhập bằng Google. Bạn không phải
+ *      viết bất kỳ dòng code "tạo tài khoản" nào cả — Cognito tự làm. Vào AWS
+ *      Console → User pool → tab Users sẽ thấy một user mới tên dạng
+ *      `Google_115482...`, cột "Identity provider" ghi là Google.
+ *
+ * ----------------------------------------------------------------------------
+ * HOSTED UI LÀ GÌ, VÀ VÌ SAO LẦN NÀY TA BẮT BUỘC PHẢI DÙNG NÓ?
+ * ----------------------------------------------------------------------------
+ *
+ * Hosted UI là trang đăng nhập DO AWS DỰNG SẴN, nằm trên tên miền của AWS:
+ *
+ *     https://<domain>.auth.<region>.amazoncognito.com
+ *
+ * Ở luồng email + mật khẩu, ta cố tình KHÔNG dùng Hosted UI: ta tự làm form đẹp
+ * theo ý mình rồi gọi thẳng API `InitiateAuth`.
+ *
+ * Với Google thì KHÔNG có lựa chọn đó. Vì sao?
+ *
+ *   Bản chất của OAuth là: người dùng phải TỰ TAY nhập mật khẩu Google TRÊN
+ *   TRANG CỦA GOOGLE. Đó chính là điểm mấu chốt khiến OAuth an toàn — mật khẩu
+ *   Google không bao giờ đi qua tay bạn, nên bạn không thể làm lộ nó dù muốn.
+ *
+ *   Mà muốn quay về được sau khi người dùng bấm "Cho phép" ở trang Google, phải
+ *   có một địa chỉ CỐ ĐỊNH, ĐÃ ĐĂNG KÝ TRƯỚC để Google trả kết quả về. Địa chỉ
+ *   đó chính là Hosted UI của Cognito (`/oauth2/idpresponse`).
+ *
+ * Nói ngắn gọn: luồng email + mật khẩu là "app hỏi hộ người dùng", còn luồng
+ * Google là "người dùng tự đi khai báo ở nơi khác rồi mang giấy chứng nhận về".
+ * Hai bản chất khác nhau, nên hai luồng kỹ thuật khác nhau.
+ *
+ * ----------------------------------------------------------------------------
+ * BIẾN MÔI TRƯỜNG `COGNITO_DOMAIN`
+ * ----------------------------------------------------------------------------
+ *
+ * Đây là biến DUY NHẤT phải thêm vào backend/.env cho tính năng này.
+ *
+ * Nó KHÔNG nằm trong danh sách bắt buộc của `readRequiredEnv()` ở đầu file. Chủ ý
+ * đấy: thiếu nó thì luồng email + mật khẩu vẫn chạy bình thường, chỉ riêng nút
+ * "Đăng nhập bằng Google" báo lỗi. Bắt cả server chết vì một tính năng phụ chưa
+ * cấu hình là phản ứng quá đà.
+ *
+ * 👉 Cách tạo domain và lấy giá trị này: đọc `.note/google-login-setup.md`.
+ */
+
+/**
+ * Chuẩn hoá `COGNITO_DOMAIN` thành một origin đầy đủ dạng `https://...`.
+ *
+ * Hàm này tồn tại thuần tuý vì lòng tốt với người dùng. Trong AWS Console, tuỳ
+ * bạn đứng ở màn hình nào mà chỗ hiển thị domain sẽ cho ra ba dạng khác nhau, và
+ * ai cũng có thể copy nhầm dạng:
+ *
+ *     todo-app-demo                                            ← chỉ phần prefix
+ *     todo-app-demo.auth.ap-southeast-1.amazoncognito.com      ← host đầy đủ
+ *     https://todo-app-demo.auth.ap-southeast-1.amazoncognito.com  ← có cả scheme
+ *
+ * Cả ba dạng đều được chấp nhận ở đây. Nếu không xử lý, người học sẽ dán dạng
+ * đầu tiên rồi nhận về lỗi `fetch failed` hoặc `ENOTFOUND` — một thông báo chẳng
+ * nói gì về nguyên nhân thật.
+ *
+ * Quy tắc rút ra: ở ranh giới giữa CON NGƯỜI và chương trình, hãy rộng rãi với
+ * dữ liệu vào. Chỗ đáng khắt khe là ranh giới giữa chương trình với chương trình.
+ */
+function readHostedUiOrigin(region: string): string | undefined {
+  const raw = process.env.COGNITO_DOMAIN?.trim();
+
+  if (!raw) {
+    return undefined;
+  }
+
+  // Bỏ "https://" ở đầu và mọi dấu "/" ở cuối, nếu người dùng lỡ dán vào.
+  const host = raw.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+
+  /*
+   * Có dấu chấm nghĩa là đã là host đầy đủ. Không có dấu chấm nghĩa là người dùng
+   * chỉ dán phần prefix, ta tự ghép nốt phần đuôi theo đúng công thức của AWS.
+   *
+   * (Nếu bạn dùng custom domain kiểu `auth.tenmiencuaban.com` thì nó có dấu chấm,
+   * nên rơi vào nhánh đầu và được giữ nguyên — vẫn đúng.)
+   */
+  const fullHost = host.includes(".")
+    ? host
+    : `${host}.auth.${region}.amazoncognito.com`;
+
+  return `https://${fullHost}`;
+}
+
+export const hostedUiConfig = {
+  /**
+   * Origin của Hosted UI, ví dụ `https://todo-app-demo.auth.ap-southeast-1.amazoncognito.com`.
+   * `undefined` nghĩa là chưa cấu hình → tính năng đăng nhập Google tắt.
+   */
+  origin: readHostedUiOrigin(cognitoConfig.region),
+
+  /**
+   * TÊN của identity provider Google bên trong User Pool.
+   *
+   * ⚠️ Với các provider dựng sẵn (Google, Facebook, Apple, Amazon), Cognito ĐẶT
+   * SẴN tên và bạn KHÔNG đổi được — nó luôn là đúng chuỗi `"Google"`, viết hoa
+   * chữ G. Gõ thành `"google"` chữ thường sẽ nhận lỗi
+   * `Identity provider not supported`.
+   *
+   * (Chỉ khi bạn tự thêm một provider dạng SAML hay OIDC thì mới được tự đặt tên.)
+   */
+  googleProviderName: "Google",
+} as const;

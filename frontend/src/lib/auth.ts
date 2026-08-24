@@ -56,9 +56,11 @@
 import { cookies } from "next/headers";
 import {
   COOKIE,
+  OAUTH_STATE_MAX_AGE_SECONDS,
   REFRESH_TOKEN_MAX_AGE_SECONDS,
   TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS,
 } from "./constants";
+import type { OAuthState } from "./oauth";
 import type { AuthSession, SessionUser } from "./types";
 
 /*
@@ -206,4 +208,110 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
+}
+
+/*
+ * ============================================================================
+ * COOKIE TẠM CỦA LUỒNG ĐĂNG NHẬP GOOGLE
+ * ============================================================================
+ *
+ * Ba hàm dưới đây quản lý cookie `oauth_state` — thứ nối liền hai nửa của luồng
+ * OAuth: lúc bấm nút (người dùng còn ở đây) và lúc quay về (vài chục giây sau,
+ * từ một website khác).
+ *
+ * ----------------------------------------------------------------------------
+ * VÌ SAO CẦN CẢ MỘT COOKIE RIÊNG CHỈ ĐỂ GIỮ MỘT CHUỖI NGẪU NHIÊN?
+ * ----------------------------------------------------------------------------
+ *
+ * Hãy hình dung tình huống: người dùng bấm nút, rời khỏi website của bạn, đi
+ * lang thang qua Cognito rồi Google, mười lăm giây sau mới quay lại.
+ *
+ * Lúc quay lại, server nhận được một request "trong lành" như mọi request khác —
+ * nó KHÔNG có cách nào biết request này là phần tiếp theo của cú bấm nút lúc nãy.
+ * HTTP vốn không có trí nhớ.
+ *
+ * Nên ta gửi kèm một "vé giữ chỗ" theo trình duyệt người dùng. Lúc họ quay về,
+ * so vé là biết ngay: chuyến đi này có phải do chính ta khởi xướng không?
+ *
+ * Không có bước so vé đó, bất kỳ ai cũng có thể tự gõ một URL callback với `code`
+ * của họ và ép trình duyệt bạn đăng nhập vào tài khoản của họ — đòn "login CSRF"
+ * đã mô tả kỹ trong `backend/src/services/auth.service.ts`.
+ */
+
+/**
+ * Cất `state` và đường dẫn cần quay về, ngay trước khi đá người dùng sang Google.
+ */
+export async function saveOAuthState(value: OAuthState) {
+  const store = await cookies();
+
+  store.set(COOKIE.oauthState, JSON.stringify(value), {
+    ...BASE_COOKIE_OPTIONS,
+    /*
+     * Dùng lại đúng bộ thuộc tính bảo mật của cookie phiên (`httpOnly`,
+     * `sameSite: "lax"`, `secure` theo môi trường), chỉ thay hạn sống.
+     *
+     * `httpOnly` ở đây quan trọng hơn vẻ ngoài: nếu JavaScript đọc được `state`,
+     * một đoạn script lạ trên trang có thể đọc trộm rồi dựng sẵn một request
+     * callback giả có `state` khớp — tức là vô hiệu hoá đúng thứ mà cookie này
+     * sinh ra để bảo vệ.
+     *
+     * `sameSite: "lax"` thì BẮT BUỘC phải là "lax", không được là "strict". Vì
+     * request quay về từ Cognito là request đến TỪ MỘT TÊN MIỀN KHÁC. Với
+     * "strict", trình duyệt sẽ không gửi cookie này kèm theo, và luồng đăng nhập
+     * đứt ngay ở bước cuối với lỗi "state không khớp" — một lỗi rất khó đoán
+     * nguyên nhân nếu chưa biết trước quy tắc này.
+     */
+    maxAge: OAUTH_STATE_MAX_AGE_SECONDS,
+  });
+}
+
+/**
+ * Đọc cookie `state` lúc người dùng quay về.
+ *
+ * Trả `null` nếu không có hoặc nội dung hỏng. Giống `getSessionUser()` phía trên,
+ * `JSON.parse` được bọc try/catch vì cookie là dữ liệu đến từ trình duyệt và
+ * người dùng hoàn toàn có thể sửa nó thành chuỗi bậy bạ. Hỏng thì coi như không
+ * có, và luồng sẽ dừng lại một cách lịch sự thay vì làm sập cả trang.
+ */
+export async function readOAuthState(): Promise<OAuthState | null> {
+  const store = await cookies();
+  const raw = store.get(COOKIE.oauthState)?.value;
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as OAuthState;
+    /*
+     * Kiểm cả kiểu dữ liệu chứ không chỉ "parse được".
+     *
+     * `JSON.parse('"xin chao"')` chạy ngon lành và trả về một chuỗi — nhưng chuỗi
+     * đó không có `.state`, và dòng so sánh ở Route Handler sẽ so `undefined` với
+     * `undefined`... rồi cho qua. Một lỗ hổng mở toang chỉ vì tin rằng "parse
+     * được nghĩa là đúng định dạng".
+     *
+     * Bài học: JSON.parse chỉ đảm bảo CÚ PHÁP hợp lệ, không đảm bảo HÌNH DẠNG dữ
+     * liệu. Ở ranh giới không đáng tin, luôn phải kiểm hình dạng.
+     */
+    if (typeof parsed?.state !== "string" || typeof parsed?.next !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Xoá cookie `state`.
+ *
+ * Phải gọi NGAY sau khi đọc, dù luồng thành công hay thất bại. Lý do: một `state`
+ * dùng rồi mà còn nằm đó là một `state` có thể bị dùng lại (tấn công "replay").
+ * Nguyên tắc chung của mọi thứ dùng-một-lần — mã OTP, token đặt lại mật khẩu,
+ * authorization code: DÙNG XONG LÀ HUỶ, không chờ tới lúc hết hạn.
+ */
+export async function clearOAuthState() {
+  const store = await cookies();
+  store.delete(COOKIE.oauthState);
 }
