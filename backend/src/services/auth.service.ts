@@ -31,6 +31,7 @@ import {
   idTokenVerifier,
   secretHash,
 } from "../lib/cognito";
+import * as userService from "./user.service";
 import { AppError } from "../utils/AppError";
 
 /*
@@ -127,6 +128,46 @@ function toAppError(err: unknown): AppError {
  * email của người khác, và để bạn chắc chắn liên lạc được với họ sau này.
  */
 export async function register(email: string, password: string) {
+  /*
+   * --------------------------------------------------------------------------
+   * 🚧 CHẶN ĐĂNG KÝ BẰNG EMAIL ĐÃ DÙNG ĐỂ ĐĂNG NHẬP GOOGLE
+   * --------------------------------------------------------------------------
+   *
+   * Kiểm tra này chạy TRƯỚC khi gọi Cognito, và nó nhìn vào bảng `User` của ta
+   * chứ không nhìn vào Cognito.
+   *
+   * Vì sao Cognito không tự chặn được? Vì với Cognito, tài khoản Google
+   * `Google_115482...` và một tài khoản mật khẩu mới toanh là hai thứ khác nhau
+   * hoàn toàn — nó thấy chưa ai đăng ký email này theo đường mật khẩu, nên nó
+   * vui vẻ tạo thêm một tài khoản nữa. Chỉ bảng `User` của ta mới biết rằng email
+   * đó đã có chủ.
+   *
+   * Đây là ví dụ rõ ràng cho một ranh giới đáng nhớ: COGNITO LO PHẦN XÁC THỰC
+   * (bạn có đúng là chủ tài khoản không), CÒN LUẬT NGHIỆP VỤ LÀ VIỆC CỦA APP.
+   * "Một email chỉ được một cách đăng nhập" là luật do ta đặt ra, nên ta phải tự
+   * thi hành nó.
+   *
+   * Hai nhánh, hai thông báo khác nhau — và sự khác nhau đó rất đáng giá:
+   *
+   *   cognitoSub CÓ giá trị  → họ đã có mật khẩu rồi, chỉ là quên. Bảo họ đăng nhập.
+   *   cognitoSub RỖNG        → họ vào bằng Google mà không nhớ. Chỉ đúng cái nút
+   *                            cần bấm, thay vì để họ loay hoay thử mật khẩu.
+   *
+   * Nếu gộp hai nhánh làm một câu chung chung ("email đã tồn tại"), người dùng ở
+   * nhánh thứ hai sẽ bế tắc: họ chắc chắn mình chưa từng đăng ký, và cũng không
+   * có mật khẩu nào để thử.
+   */
+  const existing = await userService.findUserByEmail(email);
+  if (existing) {
+    if (existing.cognitoSub) {
+      throw new AppError(409, "Email này đã được đăng ký. Hãy đăng nhập hoặc dùng email khác.");
+    }
+    throw new AppError(
+      409,
+      'Email này đã dùng để đăng nhập bằng Google. Hãy bấm nút "Đăng nhập bằng Google" thay vì đăng ký lại.',
+    );
+  }
+
   try {
     await cognitoClient.send(
       new SignUpCommand({
@@ -263,6 +304,24 @@ export async function login(email: string, password: string) {
    */
   const idClaims = await idTokenVerifier.verify(result.IdToken);
 
+  /*
+   * 🔗 GỘP DANH TÍNH — bước mới thêm khi có bảng `User`.
+   *
+   * Chạy ở đây vì đây là thời điểm DUY NHẤT ta cầm đủ hai mảnh: `sub` (định danh
+   * bất biến) và `email` (khoá để nhận ra người quen). Sau lúc này, mọi request
+   * chỉ còn access token — mà access token của Cognito thì KHÔNG chứa email.
+   *
+   * Với người dùng cũ, hàm này chỉ đọc một dòng rồi trả về. Với người vừa bấm
+   * Google lần đầu rồi hôm nay quay lại gõ mật khẩu, chính hàm này sẽ gắn
+   * `cognitoSub` vào hàng User đã có — và họ thấy nguyên vẹn đống todo đã tạo
+   * hôm trước.
+   */
+  const localUser = await userService.findOrLinkUser({
+    sub: idClaims.sub,
+    email: String(idClaims.email ?? ""),
+    provider: "cognito",
+  });
+
   return {
     accessToken: result.AccessToken,
     idToken: result.IdToken,
@@ -296,6 +355,15 @@ export async function login(email: string, password: string) {
        * thì báo lỗi ngay lúc viết code.
        */
       provider: "cognito" as const,
+      /*
+       * `id` của bảng `User` local — KHÁC với `sub` ở trên.
+       *
+       * Đây mới là giá trị nằm ở cột `Todo.userId`. Phân biệt cho rõ:
+       *
+       *   sub → "tài khoản Cognito nào" (một người có thể có hai)
+       *   id  → "con người nào"          (luôn chỉ có một)
+       */
+      id: localUser.id,
     },
   };
 }
@@ -748,6 +816,25 @@ export async function loginWithGoogle(code: string, redirectUri: string) {
    */
   const idClaims = await idTokenVerifier.verify(tokens.id_token);
 
+  /*
+   * 🔗 GỘP DANH TÍNH — và đây chính là chiều quan trọng nhất của tính năng.
+   *
+   * Gọi ĐÚNG hàm mà luồng email + mật khẩu gọi, chỉ khác tham số `provider`.
+   * Toàn bộ logic "đã gặp người này chưa" nằm gọn trong `user.service.ts`, nên
+   * hai luồng không thể lệch nhau về cách hiểu ai là ai.
+   *
+   * Kịch bản tiêu biểu: chị An đăng ký `an@gmail.com` bằng mật khẩu từ tuần
+   * trước, hôm nay bấm nút Google cho nhanh. Cognito tạo ra một tài khoản thứ
+   * hai với `sub` mới tinh — nhưng `findOrLinkUser` tìm theo email, thấy hàng cũ,
+   * và chỉ gắn thêm `googleSub` vào đó. Chị An đăng nhập xong thấy đúng danh
+   * sách todo quen thuộc, hoàn toàn không biết bên dưới vừa có chuyện gì.
+   */
+  const localUser = await userService.findOrLinkUser({
+    sub: idClaims.sub,
+    email: String(idClaims.email ?? ""),
+    provider: "google",
+  });
+
   return {
     accessToken: tokens.access_token,
     idToken: tokens.id_token,
@@ -794,6 +881,8 @@ export async function loginWithGoogle(code: string, redirectUri: string) {
       username: String(idClaims["cognito:username"] ?? idClaims.sub),
       /** Nhãn để frontend biết phải gia hạn phiên này bằng đường nào. */
       provider: "google" as const,
+      /** `id` của bảng `User` local — giá trị thật nằm ở cột `Todo.userId`. */
+      id: localUser.id,
     },
   };
 }

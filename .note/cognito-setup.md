@@ -32,7 +32,9 @@ Tấm "hộ chiếu" (gọi là **JWT** — JSON Web Token) đã được Cognit
 
 Nhờ vậy hệ thống chạy nhanh và không sập khi Cognito bận.
 
-**Cognito không lưu ghi chú (todo) của bạn.** Nó chỉ trả lời đúng một câu hỏi: "người này là ai?". Câu trả lời là một chuỗi ID gọi là `sub` (viết tắt của *subject*), ví dụ `a4e8b1c2-...`. Todo vẫn nằm trong PostgreSQL của bạn, và bạn sẽ lưu `sub` đó vào cột `userId` để biết todo nào của ai.
+**Cognito không lưu ghi chú (todo) của bạn.** Nó chỉ trả lời đúng một câu hỏi: "người này là ai?". Câu trả lời là một chuỗi ID gọi là `sub` (viết tắt của *subject*), ví dụ `a4e8b1c2-...`. Todo vẫn nằm trong PostgreSQL của bạn, và bạn sẽ dùng `sub` đó để biết todo nào của ai.
+
+> 📌 Chính xác hơn một chút: database của dự án có một bảng `User` riêng, và `Todo.userId` trỏ vào bảng đó chứ không lưu thẳng `sub`. Bảng trung gian ấy tồn tại để gộp hai cách đăng nhập (mật khẩu và Google) của cùng một người thành một tài khoản duy nhất. Chi tiết ở [google-login-setup.md](google-login-setup.md) mục 7 — chưa cần bận tâm lúc này.
 
 ---
 
@@ -223,7 +225,7 @@ Luồng thử đầy đủ:
 
 Bước 6 chính là bằng chứng tính năng đã đúng.
 
-Muốn nhìn tận mắt: vào Console → User Pool → tab **Users**, bạn sẽ thấy các tài khoản vừa tạo cùng cột `sub`. So sánh `sub` đó với cột `userId` trong bảng `Todo` (xem bằng `cd backend && npm run prisma:studio`) — chúng khớp nhau.
+Muốn nhìn tận mắt: vào Console → User Pool → tab **Users**, bạn sẽ thấy các tài khoản vừa tạo cùng cột `sub`. Mở `cd backend && npm run prisma:studio` rồi xem bảng **User** — cột `cognitoSub` chứa đúng những `sub` đó, và `Todo.userId` trỏ vào cột `id` của bảng ấy.
 
 ---
 

@@ -89,7 +89,7 @@ import { AppError } from "../utils/AppError";
  * từ CHỮ KÝ của access token Cognito. Đây là điểm khác biệt sống còn so với việc
  * đọc `req.body.userId`: client không thể tự bịa ra giá trị này.
  *
- * Vì sao phải viết hàm riêng thay vì dùng thẳng `req.user!.sub` ở bảy chỗ?
+ * Vì sao phải viết hàm riêng thay vì dùng thẳng `req.user!.id` ở bảy chỗ?
  *
  *   Vì dấu `!` là lời hứa với TypeScript rằng "chỗ này chắc chắn có giá trị", và
  *   lời hứa đó chỉ đúng CHỪNG NÀO route còn nằm sau `requireAuth`. Rải bảy dấu
@@ -100,13 +100,30 @@ import { AppError } from "../utils/AppError";
  *   Gom về một hàm có kiểm tra thật thì tình huống xấu nhất chỉ là lỗi 401 sạch
  *   sẽ. Đây là kiểu phòng thủ chiều sâu: lớp bảo vệ thứ hai cho trường hợp lớp
  *   thứ nhất bị ai đó vô tình tháo mất.
+ *
+ * ----------------------------------------------------------------------------
+ * ⚠️ ĐỌC `id` CHỨ KHÔNG PHẢI `sub` — CHỖ NÀY TỪNG LÀ `sub`
+ * ----------------------------------------------------------------------------
+ *
+ * Khi dự án có thêm bảng `User`, dòng dưới đây đã đổi từ `req.user?.sub` sang
+ * `req.user?.id`. Nhìn thì chỉ là ba ký tự, nhưng nó quyết định toàn bộ tính
+ * năng gộp tài khoản:
+ *
+ *   sub → "TÀI KHOẢN COGNITO nào". Một người đăng nhập bằng mật khẩu và bằng
+ *         Google sẽ có HAI `sub` khác nhau.
+ *   id  → "CON NGƯỜI nào". Luôn chỉ có một, kể cả khi có hai `sub`.
+ *
+ * Nếu quên sửa chỗ này, mọi thứ vẫn biên dịch được và vẫn chạy được — chỉ có
+ * điều người dùng đăng nhập bằng Google sẽ thấy danh sách trống trơn, còn todo
+ * họ tạo lúc đăng nhập bằng mật khẩu thì "biến mất". Đây đúng kiểu bug mà
+ * TypeScript không cứu được, vì cả hai đều là `string`.
  */
 function getUserId(req: Request): string {
-  const sub = req.user?.sub;
-  if (!sub) {
+  const userId = req.user?.id;
+  if (!userId) {
     throw new AppError(401, "Bạn cần đăng nhập để thực hiện thao tác này.");
   }
-  return sub;
+  return userId;
 }
 
 /**

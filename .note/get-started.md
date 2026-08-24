@@ -100,7 +100,16 @@ npm run prisma:generate
 npm run prisma:migrate
 ```
 
-Lệnh `prisma:migrate` sẽ tạo các bảng cần thiết (vd. bảng `Todo`) dựa trên `prisma/schema.prisma`.
+Lệnh `prisma:migrate` sẽ tạo các bảng cần thiết dựa trên `prisma/schema.prisma`. Dự án hiện có **hai bảng**:
+
+| Bảng | Giữ gì |
+|---|---|
+| `User` | Một hàng cho một CON NGƯỜI: email, `cognitoSub`, `googleSub` |
+| `Todo` | Công việc, với `userId` trỏ vào `User.id` |
+
+Bảng `User` tồn tại để gộp hai cách đăng nhập (mật khẩu và Google) của cùng một email thành một tài khoản duy nhất — xem [google-login-setup.md](google-login-setup.md) mục 7.
+
+> ⚠️ Nếu bạn đã chạy dự án từ trước khi có bảng `User`: migration mới **xoá toàn bộ todo cũ**, vì cột `userId` đổi ý nghĩa từ `sub` của Cognito sang `User.id`. Lý do đầy đủ nằm ngay trong file migration.
 
 (Tuỳ chọn) Xem dữ liệu bằng Prisma Studio:
 

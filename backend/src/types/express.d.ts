@@ -32,7 +32,23 @@ declare global {
        * đúng sự thật, không phải làm phiền.
        */
       user?: {
-        /** `sub` của Cognito — ID vĩnh viễn của người dùng, chính là `Todo.userId` */
+        /**
+         * `User.id` trong database của ta — ĐÂY mới là giá trị nằm ở `Todo.userId`.
+         *
+         * ⚠️ Đừng nhầm với `sub` bên dưới. Phân biệt cho rõ:
+         *
+         *   id  → "CON NGƯỜI nào".  Một người luôn có đúng một `id`.
+         *   sub → "TÀI KHOẢN COGNITO nào". Cùng một người có thể có HAI `sub`:
+         *         một của tài khoản email + mật khẩu, một của tài khoản Google.
+         *
+         * Dùng nhầm `sub` thay cho `id` khi query todo sẽ tạo ra một bug rất khó
+         * chịu: người dùng đăng nhập bằng Google không thấy todo đã tạo lúc đăng
+         * nhập bằng mật khẩu, dù đó là cùng một tài khoản.
+         */
+        id: string;
+        /** Email lấy từ bảng `User` — tiện cho việc ghi log và hiển thị. */
+        email: string;
+        /** `sub` của Cognito, đọc ra từ chữ ký của access token. */
         sub: string;
         /** Tên đăng nhập thật trong Cognito (thường là UUID khi đăng nhập bằng email) */
         username: string;

@@ -145,21 +145,46 @@ model Todo {
   /*
    * CHỦ SỞ HỮU của todo này.
    *
-   * Giá trị lưu ở đây là `sub` của AWS Cognito — một chuỗi UUID do Cognito sinh
-   * ra cho mỗi tài khoản, ví dụ "a4e8b1c2-9f3d-4a1b-8c7e-5d2f1a0b3c4d".
+   * ⚠️ Ý NGHĨA CỦA CỘT NÀY ĐÃ THAY ĐỔI. Trước kia nó lưu thẳng `sub` của Cognito.
+   * Bây giờ nó lưu `User.id` — khoá chính của bảng `User` ngay bên dưới.
    *
-   * Vì sao lưu `sub` chứ không lưu email?
-   *   Email người dùng ĐỔI ĐƯỢC. Nếu lưu email rồi ai đó đổi email, toàn bộ todo
-   *   của họ sẽ thành "mồ côi". Còn `sub` thì cố định vĩnh viễn từ lúc tài khoản
-   *   được tạo cho tới lúc bị xoá — đúng thứ ta cần cho một khoá tham chiếu.
-   *
-   * Vì sao là `String` chứ không phải quan hệ (relation) tới một model `User`?
-   *   Vì danh sách người dùng KHÔNG nằm trong database này — nó nằm bên Cognito.
-   *   Database của ta chỉ giữ cái ID để biết todo nào của ai. Đây là đánh đổi cố
-   *   ý khi dùng dịch vụ xác thực bên ngoài: bớt được toàn bộ việc quản lý mật
-   *   khẩu, đổi lại không JOIN sang bảng người dùng được nữa.
+   * Vì sao phải đổi? Vì một người có thể có TỚI HAI `sub` khác nhau trong
+   * Cognito: một cho tài khoản email + mật khẩu, một cho tài khoản Google. Nếu
+   * cột này vẫn lưu `sub`, thì cùng một con người đăng nhập bằng hai cách sẽ
+   * thấy hai danh sách todo khác nhau. Bảng `User` sinh ra chính để gộp hai
+   * danh tính đó lại làm một — đọc phần giải thích dài ở model `User` bên dưới.
    */
   userId String
+
+  /*
+   * TRƯỜNG QUAN HỆ — thứ chỉ tồn tại trong code, KHÔNG có trong database.
+   *
+   * Đây là chỗ dễ nhầm nhất khi mới học Prisma, nên phân biệt cho rõ:
+   *
+   *   `userId String`   → một CỘT THẬT trong bảng Todo, chứa chuỗi id.
+   *   `user   User`     → KHÔNG phải cột. Nó là "lối đi" trong code TypeScript,
+   *                        cho phép viết `todo.user.email` để lấy dữ liệu bảng
+   *                        kia mà không cần tự viết câu JOIN.
+   *
+   * `@relation(fields: [userId], references: [id])` nói với Prisma: "cột userId
+   * của bảng này trỏ tới cột id của bảng User". Từ khai báo đó Prisma sinh ra một
+   * KHOÁ NGOẠI (foreign key) thật trong Postgres.
+   *
+   * Khoá ngoại đem lại điều mà cách cũ (lưu thẳng `sub`) không có được: database
+   * TỪ CHỐI ghi một todo có `userId` không tồn tại trong bảng User. Trước đây,
+   * một lỗi lập trình có thể tạo ra todo mồ côi mà chẳng ai phát hiện; giờ thì
+   * Postgres chặn ngay tại chỗ. Ràng buộc ở tầng database luôn đáng tin hơn ràng
+   * buộc chỉ tồn tại trong code, vì nó đúng kể cả khi ai đó chạy SQL bằng tay.
+   *
+   * `onDelete: Cascade` trả lời câu hỏi: "xoá một User thì đám todo của họ đi về
+   * đâu?". Cascade nghĩa là xoá theo luôn. Ta chọn vậy vì todo không có ý nghĩa
+   * gì khi không còn chủ.
+   *
+   * (Mặc định của Prisma là `Restrict` — tức là CẤM xoá User chừng nào còn todo.
+   * An toàn hơn cho dữ liệu quan trọng như hoá đơn, nhưng ở đây thì phiền: muốn
+   * xoá một tài khoản test bạn phải đi xoá tay từng todo trước.)
+   */
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /*
    * @@index tạo một CHỈ MỤC trên cột userId.
@@ -177,23 +202,154 @@ model Todo {
 }
 
 /*
+ * ============================================================================
+ * MODEL USER — bảng gộp hai danh tính của cùng một con người
+ * ============================================================================
+ *
  * ----------------------------------------------------------------------------
- * KHI MUỐN MỞ RỘNG — hình dung trước cho dễ hình dung
+ * VÌ SAO CẦN BẢNG NÀY, KHI ĐÃ CÓ COGNITO GIỮ NGƯỜI DÙNG RỒI?
  * ----------------------------------------------------------------------------
- * Ví dụ muốn mỗi todo thuộc về một người dùng, bạn sẽ viết thêm:
  *
- *     model User {
- *       id    Int    @id @default(autoincrement())
- *       email String @unique          // @unique: không hai người trùng email
- *       todos Todo[]                  // một người có NHIỀU todo
- *     }
+ * Vì Cognito coi "an@gmail.com đăng ký bằng mật khẩu" và "an@gmail.com đăng nhập
+ * bằng Google" là HAI NGƯỜI KHÁC NHAU — hai bản ghi, hai `sub` riêng.
  *
- * và thêm vào model Todo hai dòng:
+ * Nghe vô lý, nhưng đó là mặc định ĐÚNG của Cognito. Tự động gộp hai tài khoản
+ * chỉ vì trùng email sẽ mở ra một lỗ hổng chiếm tài khoản: kẻ xấu tạo tài khoản
+ * ở một nhà cung cấp danh tính lỏng lẻo với email trùng email nạn nhân, đăng
+ * nhập vào, và được gộp thẳng vào tài khoản thật. Cognito không dám làm vậy.
  *
- *     userId Int
- *     user   User @relation(fields: [userId], references: [id])
+ * Nhưng với NGƯỜI DÙNG của app, hai cái đó phải là một: cùng một danh sách công
+ * việc, dù hôm nay họ bấm nút Google hay gõ mật khẩu.
  *
- * Prisma sẽ tự tạo khoá ngoại trong database, và trong code bạn có thể lấy kèm
- * dữ liệu liên quan chỉ bằng `prisma.todo.findMany({ include: { user: true } })`
- * — không phải viết câu JOIN nào cả. Đó là lúc sức mạnh của ORM lộ rõ nhất.
+ * Bảng này là chỗ hoà giải mâu thuẫn đó. Nó giữ MỘT hàng cho MỘT CON NGƯỜI, và
+ * hàng đó có thể ôm cả hai `sub`:
+ *
+ *     ┌─────────────────────── User ───────────────────────┐
+ *     │ id         = "9f3d4a1b-..."   ← Todo.userId trỏ vào │
+ *     │ email      = "an@gmail.com"   ← khoá để LIÊN KẾT    │
+ *     │ cognitoSub = "a4e8b1c2-..."   ← tài khoản mật khẩu  │
+ *     │ googleSub  = "7b2e9d54-..."   ← tài khoản Google    │
+ *     └────────────────────────────────────────────────────┘
+ *
+ * ----------------------------------------------------------------------------
+ * LIÊN KẾT THEO EMAIL CÓ AN TOÀN KHÔNG?
+ * ----------------------------------------------------------------------------
+ *
+ * Câu hỏi rất đáng đặt ra, vì "gộp tài khoản theo email" chính là chỗ đẻ ra vô
+ * số lỗ hổng chiếm tài khoản trong thực tế.
+ *
+ * Ở app này thì an toàn, và lý do nằm ở chỗ CẢ HAI luồng đều đã bắt người dùng
+ * chứng minh họ sở hữu email đó:
+ *
+ *   Luồng mật khẩu — Cognito gửi mã 6 số về hộp thư. Chưa nhập đúng mã thì tài
+ *                    khoản còn ở trạng thái UNCONFIRMED và KHÔNG đăng nhập được.
+ *                    Mà hàng trong bảng này chỉ được tạo lúc ĐĂNG NHẬP THÀNH
+ *                    CÔNG — nên không thể có hàng nào ứng với email chưa xác thực.
+ *
+ *   Luồng Google   — Google chỉ cấp những địa chỉ mà chính nó sở hữu (gmail.com)
+ *                    hoặc tên miền đã được chủ tên miền xác minh.
+ *
+ * Không luồng nào cho phép khai khống email của người khác, nên gặp nhau ở email
+ * thì đúng là gặp nhau ở một con người.
+ *
+ * ⚠️ Lập luận này SỤP ĐỔ nếu sau này bạn thêm một nhà cung cấp không xác thực
+ * email (một số provider OIDC tự dựng chẳng hạn). Khi đó phải kiểm thêm claim
+ * `email_verified` trước khi cho phép liên kết.
  */
+model User {
+  /*
+   * Khoá chính, và cũng là giá trị nằm ở cột `Todo.userId`.
+   *
+   * Vì sao dùng UUID mà không dùng số tự tăng như `Todo.id`?
+   *
+   *   1. Số tự tăng LÀM RÒ RỈ THÔNG TIN. Người dùng thấy id của mình là 47 thì
+   *      biết ngay hệ thống mới có 47 người. Đăng ký thêm một tài khoản hôm sau
+   *      thấy id 51 là suy ra tuần này có 4 người mới. Với danh sách người dùng,
+   *      đó là dữ liệu kinh doanh không nên cho ai biết.
+   *
+   *   2. UUID sinh được ở phía ứng dụng, không cần hỏi database trước. Tiện khi
+   *      sau này chia dữ liệu ra nhiều máy chủ (lúc đó bộ đếm tự tăng thành rắc
+   *      rối vì hai máy sẽ cấp trùng số).
+   *
+   * Đánh đổi: UUID dài hơn, chỉ mục nặng hơn một chút. Với bảng người dùng thì
+   * không đáng kể. Còn `Todo.id` vẫn để số tự tăng vì nó xuất hiện trên URL
+   * (`/todos/5` đẹp và dễ gõ hơn `/todos/9f3d4a1b-...`).
+   */
+  id String @id @default(uuid())
+
+  /*
+   * 🔑 CỘT QUAN TRỌNG NHẤT CỦA BẢNG — đây là thứ nối hai luồng đăng nhập lại.
+   *
+   * `@unique` không chỉ để cho đẹp: nó là RÀNG BUỘC ở tầng database, đảm bảo
+   * không bao giờ tồn tại hai hàng cùng email. Chính nhờ nó mà logic "tìm theo
+   * email rồi gắn thêm sub" luôn cho ra đúng một kết quả.
+   *
+   * Vì sao ràng buộc này phải ở database chứ không chỉ kiểm trong code?
+   *   Vì hai request đăng nhập chạy CÙNG LÚC có thể cùng kiểm "email này chưa
+   *   có" và cùng quyết định tạo mới — kiểm tra trong code không chặn được. Chỉ
+   *   database mới có cái nhìn cuối cùng và chặn được request đến sau. Ràng buộc
+   *   đúng đắn phải nằm ở nơi dữ liệu thật sự được ghi.
+   */
+  email String @unique
+
+  /*
+   * `sub` của tài khoản Cognito loại email + mật khẩu.
+   *
+   * `String?` — dấu hỏi nghĩa là ĐƯỢC PHÉP RỖNG, và đây là điểm mấu chốt của cả
+   * thiết kế. Một người đăng nhập bằng Google từ đầu thì KHÔNG có tài khoản mật
+   * khẩu nào cả, nên cột này của họ để trống.
+   *
+   * Và chính chỗ trống đó trả lời câu hỏi nghiệp vụ quan trọng nhất:
+   *
+   *     cognitoSub == null  ⟺  "người này chưa từng đặt mật khẩu"
+   *
+   * Hàm `register()` trong `auth.service.ts` dựa đúng vào phép so sánh này để
+   * chặn: ai đã đăng nhập bằng Google rồi thì không đăng ký lại bằng chính email
+   * đó nữa, mà phải tiếp tục dùng nút Google.
+   *
+   * `@unique` để một tài khoản Cognito không thể bị gắn vào hai hàng User.
+   */
+  cognitoSub String? @unique
+
+  /*
+   * `sub` của tài khoản Cognito được tạo qua Google (dạng `Google_1154829...`).
+   *
+   * Rỗng nghĩa là người này chưa từng bấm nút Google lần nào.
+   *
+   * ----------------------------------------------------------------------------
+   * VÌ SAO LÀ HAI CỘT MÀ KHÔNG PHẢI MỘT BẢNG `Identity` RIÊNG?
+   * ----------------------------------------------------------------------------
+   * Cách "chuẩn giáo khoa" sẽ là một bảng con:
+   *
+   *     model Identity { id, userId, provider, providerSub }
+   *
+   * Cách đó mở rộng tốt hơn: thêm Facebook, Apple, GitHub... chỉ là thêm dòng dữ
+   * liệu, không phải sửa cấu trúc bảng.
+   *
+   * Ta vẫn chọn hai cột, vì dự án này có đúng hai luồng và sẽ dừng ở đó. Hai cột
+   * thì đọc là hiểu ngay, query không phải JOIN, và đoạn code liên kết chỉ dài
+   * mươi dòng. Thêm một bảng nữa lúc này là trả giá phức tạp cho một khả năng
+   * chưa chắc xảy ra.
+   *
+   * 👉 Nhưng hãy nhớ ngưỡng đổi ý: tới nhà cung cấp thứ BA thì nên tách bảng
+   * `Identity`. Lúc đó cái giá của việc thêm cột thứ ba (và sửa mọi chỗ if/else
+   * kèm theo) đã vượt cái giá của một bảng con.
+   */
+  googleSub String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /*
+   * PHÍA "NHIỀU" CỦA QUAN HỆ MỘT–NHIỀU.
+   *
+   * Cũng như trường `user` bên model Todo, dòng này KHÔNG tạo ra cột nào trong
+   * bảng User. Khoá ngoại chỉ nằm ở một phía — phía Todo. Dòng này thuần tuý cho
+   * phép viết `user.todos` trong code TypeScript.
+   *
+   * Prisma BẮT BUỘC phải khai cả hai phía của một quan hệ: thiếu dòng này nó báo
+   * lỗi ngay lúc validate schema. Lý do là để nó biết chắc bạn đang mô tả "một
+   * User có nhiều Todo" chứ không phải điều gì khác.
+   */
+  todos Todo[]
+}

@@ -378,27 +378,96 @@ cd frontend && npm run dev
 
 **Bạn không viết một dòng code nào để tạo user này.** Cognito tự làm ở lần đăng nhập đầu tiên. Lần thứ hai bấm nút, nó dùng lại đúng user đó chứ không tạo thêm.
 
-### Kiểm chứng: todo được phân tách đúng chủ
+### Kiểm chứng: hai cách đăng nhập ra CÙNG một tài khoản
 
-1. Thêm vài todo bằng tài khoản Google
-2. Đăng xuất, đăng nhập bằng tài khoản email + mật khẩu cũ
-3. Danh sách **trống** — không thấy todo của tài khoản Google
+Đây là bài thử quan trọng nhất. Dùng **một email Gmail duy nhất** cho cả hai đường:
 
-Nguyên nhân: cột `Todo.userId` lưu `sub` của Cognito, mà hai tài khoản có hai `sub` khác nhau. Xem tận mắt bằng `cd backend && npm run prisma:studio`.
+1. Đăng ký `email-cua-ban@gmail.com` bằng **mật khẩu**, xác thực mã 6 số, đăng nhập
+2. Thêm vài todo
+3. Đăng xuất → bấm **"Đăng nhập bằng Google"** với **đúng email đó**
+4. ✅ Bạn thấy **nguyên vẹn** những todo vừa tạo
+
+Nhìn tận mắt cơ chế gộp bằng `cd backend && npm run prisma:studio` → mở bảng **User**. Sẽ có **một hàng duy nhất** ôm cả hai `sub`:
+
+| email | cognitoSub | googleSub |
+|---|---|---|
+| `email-cua-ban@gmail.com` | `a4e8b1c2-...` | `Google_115482...` |
+
+Trong khi đó AWS Console vẫn hiện **hai** user. Đó chính là điều bảng `User` sinh ra để giải quyết — xem mục 7.
+
+### Kiểm chứng: chiều ngược lại bị chặn
+
+1. Dùng một email Gmail **khác**, chưa từng dùng trong app
+2. Bấm **"Đăng nhập bằng Google"** trước
+3. Đăng xuất → vào trang **Đăng ký**, nhập chính email đó + mật khẩu
+4. ✅ Bị chặn: *"Email này đã dùng để đăng nhập bằng Google..."*
+
+### Kiểm chứng: todo vẫn được phân tách đúng chủ
+
+1. Đăng xuất, đăng ký/đăng nhập bằng một email **hoàn toàn khác**
+2. Danh sách **trống** — không thấy todo của tài khoản kia
+
+Hai email khác nhau thì vẫn là hai người, mỗi người một hàng `User` và một danh sách riêng. Việc gộp chỉ xảy ra khi **trùng email**.
 
 ---
 
-## 7. ⚠️ Email trùng nhau nhưng vẫn là hai tài khoản khác nhau
+## 7. Gộp tài khoản: cùng email = cùng một người
 
-Đây là hành vi khiến nhiều người tưởng là bug, nên nói rõ luôn:
+Đây là phần dễ gây bối rối nhất, nên nói thật rõ **cái gì gộp và cái gì không**.
 
-> Nếu bạn từng đăng ký bằng `an@gmail.com` theo luồng email + mật khẩu, rồi hôm sau bấm đăng nhập bằng Google **cũng với `an@gmail.com`**, Cognito coi đó là **hai người khác nhau**: hai user riêng, hai `sub` riêng, hai danh sách todo riêng.
+### Trong Cognito: vẫn là hai tài khoản
 
-Đó không phải lỗi, mà là mặc định **có chủ đích** — và là mặc định đúng.
+Nếu bạn đăng ký `an@gmail.com` bằng mật khẩu, rồi hôm sau bấm đăng nhập bằng Google **cũng với `an@gmail.com`**, vào AWS Console → tab **Users** bạn sẽ thấy **hai dòng**:
 
-Vì sao? Vì tự động gộp hai tài khoản chỉ vì trùng email sẽ mở ra một lỗ hổng chiếm tài khoản: kẻ xấu tạo một tài khoản ở nhà cung cấp lỏng lẻo nào đó với email trùng email của bạn, đăng nhập vào app, và được gộp thẳng vào tài khoản thật của bạn. Cognito không dám làm vậy, và nó đúng.
+| Username | Identity provider |
+|---|---|
+| `a4e8b1c2-9f3d-...` | (trống — tài khoản mật khẩu) |
+| `Google_115482938...` | `Google` |
 
-Muốn gộp thì phải làm **có chủ ý** bằng API `AdminLinkProviderForUser`, sau khi tự mình xác minh rằng việc gộp là an toàn. Việc đó cần AWS credentials và vượt ngoài phạm vi dự án học này.
+Đó là mặc định **có chủ đích** của Cognito, và là mặc định đúng. Tự động gộp hai tài khoản chỉ vì trùng email sẽ mở ra lỗ hổng chiếm tài khoản: kẻ xấu tạo tài khoản ở một nhà cung cấp danh tính lỏng lẻo với email trùng email nạn nhân, đăng nhập vào, và được gộp thẳng vào tài khoản thật.
+
+### Trong app: là MỘT người, MỘT danh sách todo
+
+App giải quyết chuyện này bằng **bảng `User` của riêng nó** trong PostgreSQL:
+
+```mermaid
+flowchart TB
+    A["Đăng nhập mật khẩu<br/>sub = a4e8b1c2"] --> U
+    B["Đăng nhập Google<br/>sub = Google_115482"] --> U
+    U["User (bảng local)<br/>id = 9f3d4a1b<br/>email = an@gmail.com<br/>cognitoSub = a4e8b1c2<br/>googleSub = Google_115482"]
+    U --> T["Todo.userId = 9f3d4a1b"]
+```
+
+Một hàng `User` ôm **cả hai** `sub`. Dù bạn vào bằng đường nào, mọi câu query todo đều quy về đúng một `User.id` — nên bạn luôn thấy đúng danh sách công việc của mình.
+
+Việc gộp diễn ra **lặng lẽ ngay lúc đăng nhập**, người dùng không thấy gì cả. Code nằm ở `backend/src/services/user.service.ts`, hàm `findOrLinkUser()`, và nó chỉ có ba bước:
+
+1. Tìm theo `sub` → đã gặp đúng tài khoản này rồi
+2. Tìm theo `email` → đã gặp người này qua đường khác → **gắn thêm `sub` vào hàng cũ** ← chỗ gộp xảy ra
+3. Không thấy gì → người mới → tạo hàng mới
+
+### Chiều ngược lại bị CHẶN
+
+Nếu bạn **đăng nhập bằng Google trước**, thì email đó **không đăng ký bằng mật khẩu được nữa**:
+
+> Email này đã dùng để đăng nhập bằng Google. Hãy bấm nút "Đăng nhập bằng Google" thay vì đăng ký lại.
+
+Cognito không chặn được việc này (với nó, chưa ai đăng ký email đó theo đường mật khẩu cả) — nên chính backend kiểm tra bảng `User` **trước khi** gọi Cognito. Đây là một ranh giới đáng nhớ: **Cognito lo phần xác thực, còn luật nghiệp vụ là việc của app.**
+
+### Vì sao gộp theo email lại an toàn?
+
+"Gộp tài khoản theo email" là chỗ đẻ ra vô số lỗ hổng chiếm tài khoản trong thực tế. Ở đây an toàn, vì **cả hai đường vào đều đã bắt người dùng chứng minh họ sở hữu email đó**:
+
+- **Luồng mật khẩu** — Cognito gửi mã 6 số về hộp thư. Chưa nhập đúng mã thì tài khoản còn UNCONFIRMED và **không đăng nhập được**. Mà hàng trong bảng `User` chỉ được tạo lúc **đăng nhập thành công** — nên không thể có hàng nào ứng với email chưa xác thực.
+- **Luồng Google** — Google chỉ cấp những địa chỉ mà chính nó sở hữu (`gmail.com`) hoặc tên miền đã được chủ tên miền xác minh.
+
+Không đường nào cho phép khai khống email của người khác.
+
+> ⚠️ Lập luận này **sụp đổ** nếu sau này bạn thêm một nhà cung cấp không xác thực email (một số provider OIDC tự dựng chẳng hạn). Khi đó phải kiểm thêm claim `email_verified` trước khi cho phép liên kết.
+
+### 🔴 Quên map attribute email thì sao?
+
+Backend **từ chối đăng nhập** với thông báo chỉ thẳng chỗ phải sửa. Đây không phải cẩn thận thừa — nếu cho qua, người dùng Google thứ nhất tạo hàng `User` với `email = ""`, rồi người thứ hai cũng khớp cái email rỗng đó và **hai người lạ dùng chung một tài khoản, thấy todo của nhau**. Thà đăng nhập thất bại rõ ràng còn hơn đăng nhập "thành công" vào nhầm tài khoản người khác.
 
 ---
 
@@ -415,6 +484,8 @@ Nếu bạn muốn đọc code, đây là thứ tự nên đọc:
 | 5 | `backend/src/services/auth.service.ts` → `loginWithGoogle` | Đổi `code` lấy 3 token qua endpoint `/oauth2/token`. |
 | 6 | `backend/src/services/auth.service.ts` → `refreshTokensWithHostedUi` | Gia hạn phiên Google (đường khác với phiên email + mật khẩu). |
 | 7 | `frontend/src/lib/auth.ts` | Cookie `oauth_state`: ghi, đọc, xoá. |
+| 8 | `backend/src/services/user.service.ts` | **Gộp danh tính** — `findOrLinkUser()`, ba bước tra cứu. |
+| 9 | `backend/src/middlewares/requireAuth.ts` | Đổi `sub` của token lấy `User.id` local. |
 
 ### Vì sao có cookie `oauth_state`?
 
@@ -467,6 +538,9 @@ Vì hai đường khác nhau, mỗi phiên phải nhớ mình thuộc loại nà
 | **Đăng nhập xong nhưng ô email trống** | Quên **Map attributes** `email → email` | Cognito → Identity providers → Google → sửa attribute mapping, rồi **xoá user Google đã tạo** trong tab Users và đăng nhập lại |
 | Bấm nút Google, đi một vòng, quay về đúng trang login, không lỗi gì | Proxy đã chặn route callback | Kiểm tra `matcher` trong `frontend/src/proxy.ts` có loại trừ `api/` không |
 | `Phiên đăng nhập Google đã hết hạn hoặc mã đã được dùng rồi` ngay lần đầu | `code` chỉ dùng được **một lần** — thường do F5 ở trang callback | Bấm đăng nhập lại, đừng F5 ở trang callback |
+| `Không đọc được email của tài khoản` | Quên **Map attributes** `email → email` khi thêm Google IdP | Sửa mapping trong Cognito, xoá user `Google_...` trong tab Users, đăng nhập lại |
+| `Phiên đăng nhập không còn hợp lệ. Vui lòng đăng nhập lại.` | Access token phát ra **trước** khi có bảng `User` | Đăng nhập lại một lần là xong |
+| Đăng nhập Google xong **không thấy** todo đã tạo bằng mật khẩu | Email hai bên khác nhau, nên không gộp được | Kiểm tra `SELECT email, "cognitoSub", "googleSub" FROM "User"` — hai hàng riêng nghĩa là email khác nhau |
 
 ---
 

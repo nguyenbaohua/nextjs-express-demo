@@ -89,8 +89,21 @@ export type AuthProvider = "cognito" | "google";
  */
 export type SessionUser = {
   /**
-   * `sub` — ID vĩnh viễn của tài khoản trong Cognito.
-   * Đây chính là giá trị nằm ở cột `Todo.userId` bên database.
+   * `User.id` trong database của backend — ĐÂY mới là giá trị ở cột `Todo.userId`.
+   *
+   * Frontend không dùng tới nó, nhưng backend có trả về nên khai báo cho trung
+   * thực. `?` vì cookie phiên tạo trước khi có bảng `User` sẽ không có trường này.
+   *
+   * Phân biệt với `sub` bên dưới: một con người có thể có HAI `sub` (một của tài
+   * khoản email + mật khẩu, một của tài khoản Google) nhưng luôn chỉ có MỘT `id`.
+   */
+  id?: string;
+  /**
+   * `sub` — ID của TÀI KHOẢN trong Cognito.
+   *
+   * ⚠️ Trước kia đây chính là giá trị ở cột `Todo.userId`. Từ khi backend có bảng
+   * `User` riêng để gộp hai cách đăng nhập của cùng một người, vai trò đó đã
+   * chuyển sang `id` phía trên.
    */
   sub: string;
   /** Email, dùng để hiển thị "Xin chào ..." trên giao diện. */

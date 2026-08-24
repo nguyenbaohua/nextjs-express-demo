@@ -28,6 +28,7 @@
 
 import { NextFunction, Request, Response } from "express";
 import { accessTokenVerifier } from "../lib/cognito";
+import { findUserBySub } from "../services/user.service";
 import { AppError } from "../utils/AppError";
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -76,18 +77,71 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const claims = await accessTokenVerifier.verify(token);
 
     /*
-     * BƯỚC 3 — Gắn danh tính vào request.
+     * BƯỚC 3 — Đổi `sub` của Cognito lấy người dùng trong database của ta.
      *
-     * Từ đây trở đi, mọi controller phía sau đọc `req.user.sub` là biết chắc chắn
-     * mình đang phục vụ ai. Con số đó ĐẾN TỪ CHỮ KÝ CỦA COGNITO, không phải từ
-     * dữ liệu client tự khai — đó là toàn bộ điểm mấu chốt.
+     * Đây là bước MỚI, thêm vào khi dự án có bảng `User`. Trước kia `sub` được
+     * dùng thẳng làm `Todo.userId`, nên không cần bước này.
+     *
+     * Vì sao bây giờ phải tra thêm một lần?
+     *
+     *   Vì một con người có thể có TỚI HAI `sub`: một của tài khoản email + mật
+     *   khẩu, một của tài khoản Google. Access token chỉ nói cho ta biết "tài
+     *   khoản Cognito nào", còn câu hỏi ta thật sự cần trả lời là "CON NGƯỜI
+     *   nào". Bảng `User` là chỗ duy nhất biết hai `sub` đó là một người.
+     *
+     * ⚠️ ĐÁNH ĐỔI PHẢI THỪA NHẬN: dòng này thêm MỘT QUERY DATABASE vào MỌI
+     * request có xác thực.
+     *
+     *   Đắt tới mức nào? Một câu `SELECT` trên cột có chỉ mục UNIQUE, cùng máy,
+     *   thường dưới 1ms. So với việc app vốn đã phải query lấy danh sách todo
+     *   ngay sau đó, chi phí này gần như không đáng kể.
+     *
+     *   Khi nào thì đáng lo? Khi lưu lượng lớn. Lúc đó cách xử lý là cache ánh
+     *   xạ `sub → User.id` trong bộ nhớ (nó gần như không bao giờ đổi), hoặc
+     *   nhét `User.id` vào chính token bằng Pre-Token-Generation Lambda của
+     *   Cognito. Cả hai đều là tối ưu hoá nên làm KHI ĐO ĐƯỢC vấn đề, không phải
+     *   làm trước từ bây giờ.
+     */
+    const user = await findUserBySub(claims.sub);
+
+    if (!user) {
+      /*
+       * Token hợp lệ nhưng không có hàng User nào ứng với nó.
+       *
+       * Nghe như không thể xảy ra, nhưng có một tình huống rất thật: những access
+       * token được phát TRƯỚC khi bảng `User` tồn tại vẫn còn hiệu lực với Cognito
+       * thêm một giờ nữa. Người dùng đang mở tab sẵn sẽ rơi đúng vào đây.
+       *
+       * 401 là câu trả lời đúng: frontend thấy 401 thì đưa về trang đăng nhập,
+       * người dùng đăng nhập lại một lần, `findOrLinkUser` tạo hàng User, và mọi
+       * thứ trở lại bình thường. Tự động tạo hàng User ở đây thì KHÔNG làm được,
+       * vì access token không chứa email — mà thiếu email thì không gộp danh tính
+       * được (xem `user.service.ts`).
+       */
+      return next(new AppError(401, "Phiên đăng nhập không còn hợp lệ. Vui lòng đăng nhập lại."));
+    }
+
+    /*
+     * BƯỚC 4 — Gắn danh tính vào request.
+     *
+     * Từ đây trở đi, mọi controller phía sau đọc `req.user.id` là biết chắc chắn
+     * mình đang phục vụ ai. Giá trị đó bắt nguồn từ CHỮ KÝ CỦA COGNITO, không
+     * phải từ dữ liệu client tự khai — đó là toàn bộ điểm mấu chốt.
      *
      * Hãy hình dung phương án tệ: cho client gửi `userId` trong body request.
      * Khi đó ai cũng có thể sửa một con số trong DevTools để đọc todo của người
      * khác. Với `sub` lấy từ token đã ký, muốn giả mạo thì phải giả được chữ ký
      * của AWS — điều mà mật mã học đảm bảo là bất khả thi.
+     *
+     * Ta gắn cả ba giá trị, và mỗi cái một vai trò rõ ràng:
+     *
+     *   id       — "CON NGƯỜI nào"  → dùng cho mọi query todo
+     *   sub      — "TÀI KHOẢN COGNITO nào" → giữ lại để ghi log, gỡ lỗi
+     *   username — tên đăng nhập thật trong Cognito
      */
     req.user = {
+      id: user.id,
+      email: user.email,
       sub: claims.sub,
       username: String(claims.username ?? claims.sub),
     };

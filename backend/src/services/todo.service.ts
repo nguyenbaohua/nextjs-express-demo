@@ -71,8 +71,13 @@ function notFoundError(id: number) {
  * MỌI hàm bên dưới đều nhận tham số `userId`, và MỌI câu query đều phải có
  * `userId` trong mệnh đề `where`. Không có ngoại lệ.
  *
- * `userId` này là `sub` do middleware `requireAuth` đọc ra TỪ CHỮ KÝ của token
- * Cognito. Client không tự khai được nó.
+ * `userId` này là `User.id` trong database của ta, do middleware `requireAuth`
+ * tra ra từ `sub` mà nó đọc được TỪ CHỮ KÝ của token Cognito. Client không tự
+ * khai được nó.
+ *
+ * (Trước khi dự án có bảng `User`, giá trị này là `sub` của Cognito. Đã đổi khi
+ * thêm tính năng gộp tài khoản — vì một người có thể có hai `sub` nhưng chỉ có
+ * một `User.id`. Xem `services/user.service.ts`.)
  *
  * Vì sao phải nhấn mạnh đến thế? Vì đây chính xác là chỗ mà lỗ hổng bảo mật phổ
  * biến nhất thế giới web sinh ra. Nó có tên riêng: IDOR — *Insecure Direct
@@ -151,8 +156,9 @@ export async function getTodoById(id: number, userId: string) {
  * Tạo todo mới cho một người dùng.
  *
  * Điểm mấu chốt về bảo mật: `userId` KHÔNG đến từ body request. Nó được
- * controller lấy từ `req.user.sub` — tức là từ token đã ký. Nếu để client tự gửi
- * `userId` lên, ai cũng có thể tạo todo mang tên người khác.
+ * controller lấy từ `req.user.id` — giá trị mà `requireAuth` tra ra từ token đã
+ * ký. Nếu để client tự gửi `userId` lên, ai cũng có thể tạo todo mang tên người
+ * khác.
  *
  * Các trường còn lại được điền tự động theo khai báo trong `schema.prisma`:
  *   id        `@default(autoincrement())` → Postgres tự cấp số tăng dần
