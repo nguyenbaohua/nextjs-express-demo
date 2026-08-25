@@ -307,6 +307,8 @@ Thêm provider vào pool thôi thì chưa đủ — còn phải cho phép **app 
 
    ✅ Tick: **openid**, **email**, **profile**
 
+   > 🔴 **Cẩn thận: `Phone` nằm ngay trên `Profile`.** Hai dòng này cùng bắt đầu bằng `P` và có chú thích *"Requires OpenID to be selected"* giống hệt nhau, nên rất dễ tick nhầm rồi vẫn tưởng mình đã đủ ba cái. Tick nhầm thì luồng Google chết ngay từ bước đầu với lỗi `invalid_scope`. Xem [Bẫy `Phone` và `Profile`](#bẫy-phone-và-profile) ở mục 9.
+
 4. Bấm **Save changes**
 
 ---
@@ -525,8 +527,55 @@ Vì hai đường khác nhau, mỗi phiên phải nhớ mình thuộc loại nà
 | `redirect_mismatch` | **Allowed callback URLs** trong Cognito không khớp | Phải đúng `http://localhost:3001/api/auth/callback/google` |
 | `Identity provider not supported` / `invalid_request` | Chưa tick **Google** trong Identity providers của app client | App client → Login pages → Edit → tick Google |
 | `unauthorized_client` | Chưa tick **Authorization code grant** | App client → Login pages → Edit → tick Authorization code grant |
+| `error_description=invalid_scope` (quay về callback ngay, chưa kịp sang Google) | App client thiếu một trong ba scope `openid` / `email` / `profile` | Xem mục [Bẫy `Phone` và `Profile`](#bẫy-phone-và-profile) ngay dưới bảng này |
 | `An error was encountered with the requested page` | Domain đúng nhưng Hosted UI chưa được cấu hình đủ | Kiểm tra đã lưu đủ callback URL, identity providers, grant types, scopes |
 | Đăng nhập bằng **email + mật khẩu** đột nhiên hỏng | Vô tình bỏ tick **Cognito user pool** ở Identity providers | Tick lại |
+
+### Bẫy `Phone` và `Profile`
+
+Lỗi `invalid_scope` đáng được một mục riêng, vì nó là cái bẫy mà dự án này đã sập một lần.
+
+Danh sách **OpenID Connect scopes** trong app client có 5 dòng, xếp theo bảng chữ cái:
+
+```
+aws.cognito.signin.user.admin
+Email      (Requires OpenID to be selected)
+OpenID
+Phone      (Requires OpenID to be selected)   ← KHÔNG phải cái này
+Profile    (Requires OpenID to be selected)   ← cái cần tick
+```
+
+`Phone` và `Profile` nằm sát nhau, cùng bắt đầu bằng `P`, và có **dòng chú thích y hệt nhau**. Rất dễ tick nhầm rồi đếm đủ ba cái mà vẫn sai.
+
+Chỉ cần **một** scope trong `openid email profile` chưa được cấp phép là Cognito chặn ngay ở bước `/oauth2/authorize` — người dùng chưa kịp nhìn thấy màn hình Google, mà URL callback đã mang về `error_description=invalid_scope`.
+
+### Tự kiểm tra scope bằng `curl` (không cần mở trình duyệt)
+
+Thay vì bấm đi bấm lại trên trình duyệt, hãy hỏi thẳng Cognito xem nó cho phép scope nào. Đây là cách nhanh nhất để phân biệt "cấu hình sai" với "code sai":
+
+```bash
+D=$(grep '^COGNITO_DOMAIN=' backend/.env | cut -d= -f2-)
+C=$(grep '^COGNITO_CLIENT_ID=' backend/.env | cut -d= -f2-)
+R=http%3A%2F%2Flocalhost%3A3001%2Fapi%2Fauth%2Fcallback%2Fgoogle
+
+for S in "openid+email+profile" "openid" "email" "profile"; do
+  U=$(curl -s -o /dev/null -w '%{redirect_url}' \
+    "$D/oauth2/authorize?response_type=code&client_id=$C&redirect_uri=$R&scope=$S&state=test123&identity_provider=Google")
+  case "$U" in
+    *accounts.google.com*) echo "scope=$S  ->  OK";;
+    *) echo "scope=$S  ->  LOI: ${U#*callback/google?}";;
+  esac
+done
+```
+
+Đọc kết quả:
+
+- **`OK`** — Cognito chấp nhận và đã dựng sẵn URL sang Google. Scope đó ổn.
+- **`LOI: ...invalid_scope...`** — scope đó **chưa** được tick trong app client.
+
+Chạy từng scope riêng lẻ như trên sẽ chỉ đúng tên thủ phạm, thay vì chỉ biết chung chung là "có cái gì đó sai".
+
+> 💡 Mẹo đọc thêm: khi có dòng `OK`, hãy in cả URL ra xem. Nó chứa `client_id` của **Google** và `scope=profile email openid` mà Cognito sẽ gửi sang Google — tức là bạn kiểm tra được luôn phần **Google IdP** bên trong Cognito đã khai đúng chưa, cũng không cần mở trình duyệt.
 
 ### Lỗi phía app
 
@@ -582,7 +631,7 @@ Nếu bạn đã làm quen rồi và chỉ cần checklist:
       • Sign-out URL:      http://localhost:3001/login
       • Identity providers: ✅ Google  ✅ Cognito user pool
       • Grant type:        ✅ Authorization code grant
-      • Scopes:            ✅ openid  ✅ email  ✅ profile
+      • Scopes:            ✅ openid  ✅ email  ✅ profile   ← KHÔNG phải Phone
 
 5. backend/.env         → COGNITO_DOMAIN=<prefix>
    frontend/.env.local  → APP_BASE_URL=http://localhost:3001

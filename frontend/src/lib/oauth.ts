@@ -133,11 +133,18 @@ export function createOAuthState(): string {
  * bạn định sẵn, đừng bao giờ để nó TRỞ THÀNH nội dung hiển thị.
  */
 export const GOOGLE_LOGIN_ERROR_CODES = {
-  /** Người dùng bấm "Huỷ" ở màn hình Google, hoặc Cognito từ chối. */
+  /**
+   * CHỈ dùng cho `error=access_denied` — người dùng bấm "Huỷ" ở màn hình Google.
+   *
+   * ⚠️ Đừng dùng mã này cho các lỗi `error=...` khác mà Cognito trả về. Nói với
+   * người dùng rằng họ đã huỷ, trong khi thật ra cấu hình của ta sai, là vừa sai
+   * sự thật vừa khiến chính bạn đi tìm bug sai hướng. Chi tiết ở
+   * `app/api/auth/callback/google/route.ts`.
+   */
   denied: "google_denied",
   /** `state` không khớp hoặc cookie đã hết hạn → nghi ngờ CSRF, hoặc chỉ là chờ quá lâu. */
   state: "google_state",
-  /** Đổi `code` lấy token thất bại (thường do cấu hình sai). */
+  /** Cognito từ chối request, hoặc đổi `code` lấy token thất bại — hầu như luôn do cấu hình sai. */
   failed: "google_failed",
 } as const;
 

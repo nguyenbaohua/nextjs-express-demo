@@ -41,9 +41,9 @@
  * BA TÌNH HUỐNG PHẢI XỬ LÝ, THEO ĐÚNG THỨ TỰ
  * ----------------------------------------------------------------------------
  *
- *   1. Người dùng bấm "Huỷ" ở Google → URL có `?error=access_denied`
- *   2. `state` không khớp             → nghi ngờ tấn công, hoặc cookie đã hết hạn
- *   3. Mọi thứ ổn                     → đổi `code` lấy token và lưu phiên
+ *   1. URL có `?error=...`  → người dùng bấm "Huỷ", HOẶC cấu hình phía ta sai
+ *   2. `state` không khớp   → nghi ngờ tấn công, hoặc cookie đã hết hạn
+ *   3. Mọi thứ ổn           → đổi `code` lấy token và lưu phiên
  *
  * Thứ tự này không tuỳ tiện: kiểm tra rẻ và chắc chắn nhất đặt trước, việc tốn
  * kém nhất (gọi mạng ra Cognito) đặt sau cùng. Không có lý do gì phải gọi mạng
@@ -89,18 +89,44 @@ export async function GET(request: NextRequest) {
 
   /*
    * --------------------------------------------------------------------------
-   * TÌNH HUỐNG 1 — người dùng đổi ý
+   * TÌNH HUỐNG 1 — Cognito trả về lỗi thay vì `code`
    * --------------------------------------------------------------------------
-   * Bấm "Huỷ" ở màn hình chọn tài khoản Google, hoặc Google/Cognito từ chối vì
-   * lý do nào đó. Cognito quay về với `?error=access_denied`.
    *
-   * Đây KHÔNG phải lỗi hệ thống, chỉ là người dùng đổi ý. Nên ta đưa họ về trang
-   * đăng nhập với một câu nhẹ nhàng, không ghi log cảnh báo, không làm gì to tát.
-   * Phân biệt được "lỗi" và "người dùng đổi ý" là dấu hiệu của một app được viết
-   * cẩn thận.
+   * Ở đây có HAI loại lỗi hoàn toàn khác nhau, và việc gộp chúng làm một là một
+   * cái bẫy đã cắn chính dự án này một lần — nên đọc kỹ đoạn dưới.
+   *
+   *   `error=access_denied` → NGƯỜI DÙNG ĐỔI Ý. Họ bấm "Huỷ" ở màn hình chọn
+   *       tài khoản Google. Không có gì hỏng cả. Đưa họ về trang đăng nhập với
+   *       một câu nhẹ nhàng, không ghi log, không báo động.
+   *
+   *   mọi `error` khác → LỖI CỦA CHÚNG TA. Cognito từ chối chính cái request mà
+   *       backend dựng ra, thường vì cấu hình app client trong AWS Console chưa
+   *       khớp với code. Người dùng không làm gì sai và cũng không tự sửa được.
+   *
+   * 🔍 VÌ SAO PHẢI TÁCH RA, VÀ VÌ SAO PHẢI GHI LOG `error_description`?
+   *
+   * Bản đầu tiên của file này gộp cả hai vào một câu `if` rồi trả về cùng mã
+   * `google_denied`. Hậu quả: khi app client thiếu scope `profile`, Cognito trả
+   * `error=invalid_request&error_description=invalid_scope`, nhưng màn hình lại
+   * hiện "Bạn đã huỷ đăng nhập bằng Google" — một câu SAI SỰ THẬT, vì người dùng
+   * còn chưa kịp nhìn thấy màn hình Google để mà huỷ. Thông tin duy nhất chỉ ra
+   * nguyên nhân thật (`invalid_scope`) nằm ngay trên URL nhưng bị vứt đi, không
+   * log lại. Mất khá nhiều thời gian mới lần ra.
+   *
+   * Bài học chung: khi một dịch vụ bên ngoài đã chịu khó nói cho bạn biết nó
+   * hỏng ở đâu, ĐỪNG NUỐT MẤT CÂU ĐÓ. Người dùng không cần đọc nó, nhưng log thì
+   * cần — đó là khác biệt giữa "sửa trong 30 giây" và "mò cả buổi".
    */
   if (errorParam) {
-    redirect(loginPageWithError(GOOGLE_LOGIN_ERROR_CODES.denied));
+    if (errorParam === "access_denied") {
+      redirect(loginPageWithError(GOOGLE_LOGIN_ERROR_CODES.denied));
+    }
+
+    console.error(
+      `[google-login] Cognito từ chối request: error=${errorParam}` +
+        ` error_description=${params.get("error_description") ?? "(không có)"}`,
+    );
+    redirect(loginPageWithError(GOOGLE_LOGIN_ERROR_CODES.failed));
   }
 
   /*
