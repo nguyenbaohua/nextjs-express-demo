@@ -10,25 +10,60 @@
  *
  * Nguyên tắc bao trùm: KHÔNG BAO GIỜ TIN DỮ LIỆU TỪ CLIENT. Ai cũng có thể gửi
  * bất cứ thứ gì tới API của bạn bằng `curl` — trình duyệt không phải là hàng rào.
+ *
+ * ----------------------------------------------------------------------------
+ * VÌ SAO VALIDATE LÀ VIỆC BẮT BUỘC, KHÔNG PHẢI VIỆC "NÊN LÀM"
+ * ----------------------------------------------------------------------------
+ *
+ * Câu cần nhớ: **TypeScript chỉ tồn tại lúc bạn viết code. Lúc chạy, nó biến
+ * mất hoàn toàn.** Mọi khai báo kiểu bị xoá sạch khi biên dịch sang JavaScript.
+ *
+ * Nên viết `const { email } = req.body as { email: string }` chỉ là một lời hứa
+ * suông với trình biên dịch. Lúc chạy thật, `email` có thể là số, là `null`, là
+ * một mảng, hoặc không tồn tại — và code của bạn sẽ nổ ở một chỗ xa tít phía
+ * sau, với thông báo lỗi chẳng liên quan gì tới nguyên nhân thật.
+ *
+ * zod lấp đúng khoảng trống đó: kiểm tra THẬT lúc chạy, đồng thời cho TypeScript
+ * biết kiểu dữ liệu SAU khi kiểm.
  */
 
 import { z } from "zod";
 
 /*
- * Vì sao lại kiểm tra mật khẩu ở đây khi Cognito cũng đã kiểm rồi?
+ * ----------------------------------------------------------------------------
+ * LUẬT CHO MẬT KHẨU MỚI
+ * ----------------------------------------------------------------------------
  *
- * Hai lý do:
+ * Backend này tự quản lý mật khẩu, nên ĐÂY là nơi DUY NHẤT định nghĩa "thế nào
+ * là mật khẩu hợp lệ". Không có dịch vụ nào phía sau kiểm lại — file này vừa là
+ * cửa vào, vừa là luật. (Ô `minLength` bên `RegisterForm.tsx` chỉ để báo lỗi sớm
+ * cho người dùng; xoá nó trong DevTools là qua mặt được, còn luật ở đây thì không.)
  *
- *   1. Trải nghiệm. Kiểm ở đây thì người dùng nhận được câu tiếng Việt rõ ràng
- *      ngay lập tức, thay vì một chuỗi lỗi tiếng Anh từ AWS.
+ * Vì sao chỉ đặt luật tối thiểu 8 ký tự, mà không bắt phải có chữ hoa, số và ký
+ * tự đặc biệt như nhiều trang web hay làm?
  *
- *   2. Tiết kiệm. Bắt lỗi tại chỗ thì khỏi phải đi một vòng ra Internet chỉ để
- *      nhận về lời từ chối.
+ * Vì các luật đó phản tác dụng, và điều này đã được nghiên cứu kỹ. Khuyến nghị
+ * hiện hành của NIST (cơ quan tiêu chuẩn Hoa Kỳ, tài liệu SP 800-63B) nói thẳng:
+ * ĐỪNG áp luật thành phần ký tự.
  *
- * Nhưng lưu ý: Cognito vẫn là NGƯỜI GÁC CỔNG CUỐI CÙNG. Ta cố ý chỉ kiểm phần
- * đơn giản nhất (độ dài 8 ký tự) chứ không sao chép toàn bộ password policy của
- * Cognito sang đây — vì hai bản luật sao chép nhau kiểu gì cũng có ngày lệch
- * nhau, và khi đó rất khó lần ra bên nào mới đúng.
+ * Lý do rất con người: bắt phải có chữ hoa và số thì người ta không nghĩ ra mật
+ * khẩu mạnh hơn, họ chỉ biến "matkhau" thành "Matkhau1!" — thêm đúng hai bit
+ * khó đoán, mà lại khó nhớ hơn hẳn nên cuối cùng họ ghi ra giấy dán màn hình,
+ * hoặc dùng lại đúng mật khẩu đó ở mọi trang.
+ *
+ * Trong khi "con meo ngoi tren mai nha" dài 27 ký tự, dễ nhớ vô cùng, và khó
+ * đoán hơn "Matkhau1!" hàng tỷ lần. Luật thành phần ký tự sẽ TỪ CHỐI nó.
+ *
+ * Nên luật đúng đắn là: đặt sàn ĐỘ DÀI, đừng ép thành phần.
+ *
+ * `.max(256)` không phải để ép người dùng, mà để CHỐNG TẤN CÔNG: bcrypt tốn CPU
+ * theo độ dài đầu vào, nên nếu cho gửi chuỗi 100MB thì chỉ vài request là đủ
+ * làm nghẽn server. Đây là một dạng từ chối dịch vụ rẻ tiền mà rất hay bị bỏ
+ * sót — hễ có hàm nào tốn CPU, hãy đặt trần cho đầu vào của nó.
+ *
+ * (Một lưu ý kỹ thuật: bcrypt chỉ dùng 72 byte đầu tiên, phần sau bị bỏ qua
+ * lặng lẽ. Đặt trần 256 vẫn hợp lý để thông báo lỗi thân thiện, nhưng đừng
+ * tưởng mật khẩu 200 ký tự thì an toàn hơn 72 ký tự.)
  */
 const passwordSchema = z
   .string()
@@ -39,132 +74,69 @@ const emailSchema = z
   .string()
   .trim()
   /*
-   * .toLowerCase() KHÔNG chỉ để cho đẹp.
+   * `.toLowerCase()` KHÔNG chỉ để cho đẹp.
    *
-   * Cognito coi "An@Gmail.com" và "an@gmail.com" là hai người khác nhau. Nếu
-   * không chuẩn hoá, người dùng đăng ký bằng chữ hoa rồi hôm sau gõ chữ thường
-   * sẽ không đăng nhập được, và họ sẽ chẳng hiểu vì sao. Chuẩn hoá ngay tại cửa
-   * vào là cách rẻ nhất để tránh cả một loại bug.
+   * Postgres so sánh chuỗi CÓ phân biệt hoa thường, nên "An@Gmail.com" và
+   * "an@gmail.com" là hai giá trị khác nhau với cột `User.email @unique`. Không
+   * chuẩn hoá thì cùng một người đăng ký được hai tài khoản, và tệ hơn: hôm nay
+   * gõ chữ hoa đăng ký, mai gõ chữ thường thì không đăng nhập được — mà họ
+   * chẳng hiểu vì sao vì mắt thường nhìn hai chuỗi đó là một.
+   *
+   * ⚠️ Thứ tự các bước rất quan trọng, và đây là chỗ hay viết sai:
+   *
+   *     .trim() → .toLowerCase() → .email()
+   *
+   * `.email()` phải đứng CUỐI. Nếu kiểm định dạng trước rồi mới cắt khoảng
+   * trắng, thì chuỗi " an@gmail.com" bị từ chối oan dù chỉ thừa một dấu cách mà
+   * người dùng vô tình copy vào. Chuẩn hoá trước, kiểm tra sau.
+   *
+   * Lợi ích kép của việc chuẩn hoá ngay tại cửa vào: từ sau dòng `.parse()`,
+   * MỌI tầng bên trong đều chắc chắn nhận được email đã sạch và viết thường.
+   * Tầng service không cần và không nên `.toLowerCase()` lại lần nữa.
    */
   .toLowerCase()
   .email("Email không hợp lệ");
 
+/** POST /api/auth/register — tạo tài khoản mới. */
 export const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
 });
 
+/** POST /api/auth/login — đổi email + mật khẩu lấy cặp token. */
 export const loginSchema = z.object({
   email: emailSchema,
   /*
-   * Lúc ĐĂNG NHẬP chỉ cần mật khẩu không rỗng — cố ý không dùng `passwordSchema`.
+   * Lúc ĐĂNG NHẬP chỉ cần mật khẩu không rỗng — cố ý KHÔNG dùng `passwordSchema`.
    *
-   * Vì sao? Giả sử mai này bạn nới password policy, những tài khoản cũ có mật
-   * khẩu 6 ký tự vẫn phải đăng nhập được. Áp luật "mật khẩu mới" lên hành động
-   * "đăng nhập" sẽ khoá chính người dùng hợp lệ ra ngoài.
+   * Vì sao? Giả sử mai này bạn nâng sàn độ dài từ 8 lên 12 ký tự. Những tài
+   * khoản đã tạo trước đó có mật khẩu 8 ký tự vẫn phải đăng nhập được chứ. Áp
+   * luật "mật khẩu mới" lên hành động "đăng nhập" sẽ khoá chính người dùng hợp
+   * lệ ra ngoài, và họ không có cách nào tự sửa.
    *
-   * Quy tắc rút ra: luật về ĐỘ MẠNH mật khẩu chỉ áp lúc TẠO/ĐỔI mật khẩu, không
-   * bao giờ áp lúc kiểm tra.
+   * Quy tắc rút ra: luật về ĐỘ MẠNH chỉ áp lúc TẠO hoặc ĐỔI mật khẩu, không bao
+   * giờ áp lúc KIỂM TRA mật khẩu.
+   *
+   * `.min(1)` vẫn cần, để chặn body `{"password": ""}` đi xuống tận bcrypt một
+   * cách vô nghĩa.
    */
   password: z.string().min(1, "Mật khẩu không được để trống"),
 });
 
-export const confirmSchema = z.object({
-  email: emailSchema,
-  /*
-   * Mã xác thực của Cognito luôn là 6 chữ số.
-   * regex `^\d{6}$` đọc là: từ đầu chuỗi, đúng 6 ký tự số, rồi hết chuỗi.
-   */
-  code: z
-    .string()
-    .trim()
-    .regex(/^\d{6}$/, "Mã xác thực gồm 6 chữ số"),
-});
-
-export const resendCodeSchema = z.object({
-  email: emailSchema,
-});
-
-/*
- * ----------------------------------------------------------------------------
- * NHÃN "PHIÊN NÀY ĐẾN TỪ ĐÂU"
- * ----------------------------------------------------------------------------
+/**
+ * POST /api/auth/refresh và POST /api/auth/logout.
  *
- * Từ khi có đăng nhập bằng Google, hệ thống có HAI loại phiên, và mỗi loại gia
- * hạn token theo một cách khác nhau (xem `auth.service.ts`):
+ * Hai API khác nhau dùng chung một schema, vì cả hai đều chỉ cần đúng một thứ:
+ * refresh token. Dùng chung là hợp lý ở đây — nhưng hãy cẩn thận với thói quen
+ * đó: hai schema TÌNH CỜ giống nhau hôm nay có thể cần rẽ hướng khác nhau ngày
+ * mai, và lúc đó việc tách ra sẽ phiền hơn là để riêng từ đầu. Chỉ gộp khi
+ * chúng giống nhau vì cùng MỘT LÝ DO, như trường hợp này.
  *
- *   "cognito" — đăng nhập bằng email + mật khẩu → gia hạn qua InitiateAuth
- *   "google"  — đăng nhập qua Hosted UI         → gia hạn qua /oauth2/token
- *
- * `z.enum` chỉ chấp nhận đúng hai chuỗi này. Gửi lên "facebook" là bị từ chối
- * ngay tại cửa, không lọt vào tới service — đúng tinh thần "không tin dữ liệu từ
- * client" đã nói ở đầu file.
+ * Chú ý ta KHÔNG kiểm độ dài hay định dạng hex của token. Cố tình như vậy: token
+ * hợp lệ hay không thì tầng service tra database sẽ biết, và đó mới là câu trả
+ * lời đáng tin. Thêm `.length(128)` ở đây chỉ tạo ra một luật thứ hai phải nhớ
+ * cập nhật mỗi khi đổi `REFRESH_TOKEN_BYTES` — một cái bẫy chờ sẵn cho tương lai.
  */
-export const authProviderSchema = z.enum(["cognito", "google"]);
-
-export const refreshSchema = z.object({
+export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, "Thiếu refresh token"),
-  /*
-   * `.optional()` vì lý do rất thực tế: những người đang đăng nhập TỪ TRƯỚC khi
-   * tính năng Google được thêm vào có cookie phiên không hề chứa trường này. Bắt
-   * buộc phải có sẽ đá toàn bộ họ ra ngoài ngay lần gia hạn kế tiếp.
-   *
-   * Thiếu thì controller hiểu mặc định là "cognito" — đúng, vì trước đây chỉ có
-   * đúng một luồng đó.
-   *
-   * Bài học chung: mỗi khi thêm một trường BẮT BUỘC vào dữ liệu đã tồn tại sẵn
-   * ngoài thực tế, hãy nghĩ tới những bản ghi cũ chưa có trường đó.
-   */
-  provider: authProviderSchema.optional(),
-  /*
-   * `username` chỉ cần cho luồng "cognito". Việc kiểm tra "thiếu username khi
-   * provider là cognito" nằm ở controller chứ không ở đây, vì zod diễn tả ràng
-   * buộc kiểu "trường A bắt buộc TUỲ THEO giá trị trường B" khá rườm rà, mà
-   * một câu `if` ở controller thì ai đọc cũng hiểu ngay.
-   */
-  username: z.string().trim().min(1).optional(),
-});
-
-/*
- * ----------------------------------------------------------------------------
- * SCHEMA CHO LUỒNG ĐĂNG NHẬP BẰNG GOOGLE
- * ----------------------------------------------------------------------------
- */
-
-/*
- * `redirectUri` do frontend gửi lên, nên về nguyên tắc là dữ liệu KHÔNG ĐÁNG TIN.
- *
- * Ta chỉ kiểm hình thức tối thiểu (phải là URL http/https) chứ không cố kiểm
- * "URL này có phải của mình không". Vì sao dừng lại ở đó?
- *
- *   Vì Cognito mới là người gác cổng thật: nó đối chiếu `redirect_uri` với danh
- *   sách "Allowed callback URLs" mà bạn khai trong AWS Console, và từ chối thẳng
- *   nếu không khớp. Viết thêm một lớp kiểm tra ở đây chỉ tạo ra hai bộ luật có
- *   thể lệch nhau — đúng cái bẫy đã nói ở phần `passwordSchema` phía trên.
- *
- * `z.url()` là cú pháp của zod v4 (bản trước viết là `z.string().url()`).
- */
-const redirectUriSchema = z
-  .url("redirectUri không hợp lệ")
-  .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
-    message: "redirectUri phải bắt đầu bằng http:// hoặc https://",
-  });
-
-/** GET /api/auth/google/url — xin URL để đá người dùng sang Google. */
-export const googleAuthorizeUrlSchema = z.object({
-  redirectUri: redirectUriSchema,
-  /*
-   * Chuỗi ngẫu nhiên chống CSRF do frontend sinh ra.
-   *
-   * Đặt sàn 8 ký tự để chặn kiểu gọi ẩu `state=1` — một `state` đoán được thì
-   * cũng như không có. Backend không sinh `state` hộ được, vì người phải CẤT nó
-   * vào cookie và ĐỐI CHIẾU lúc quay về là frontend.
-   */
-  state: z.string().trim().min(8, "state quá ngắn"),
-});
-
-/** POST /api/auth/google/callback — đổi `code` lấy token. */
-export const googleCallbackSchema = z.object({
-  code: z.string().trim().min(1, "Thiếu authorization code"),
-  redirectUri: redirectUriSchema,
 });

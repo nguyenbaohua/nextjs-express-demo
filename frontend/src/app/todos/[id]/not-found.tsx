@@ -33,7 +33,7 @@
  */
 
 import Link from "next/link";
-import { ROUTES } from "@/lib/constants";
+import { ROUTES } from "@/shared/config/constants";
 import styles from "./not-found.module.css";
 
 export default function TodoNotFound() {

@@ -7,7 +7,7 @@
  * trong một middleware.
  *
  * Middleware là một hàm nằm CHẮN GIỮA request và controller. Nó có ba lựa chọn:
- *   - gọi `next()`  → cho đi tiếp
+ *   - gọi `next()`    → cho đi tiếp
  *   - gọi `next(err)` → chuyển sang errorHandler
  *   - tự trả response → dừng luôn tại đây
  *
@@ -24,19 +24,34 @@
  * Gắn ở tầng router (`router.use(requireAuth)`) thì mọi route trong đó, kể cả
  * route thêm sau này, TỰ ĐỘNG được bảo vệ. Bảo mật nên là mặc định, không nên là
  * thứ phải nhớ.
+ *
+ * ----------------------------------------------------------------------------
+ * ĐIỀU ĐÁNG CHÚ Ý NHẤT: HÀM NÀY KHÔNG CHẠM VÀO DATABASE
+ * ----------------------------------------------------------------------------
+ * Không có `prisma` trong file này. Toàn bộ thông tin cần thiết đã nằm sẵn bên
+ * trong access token, và chữ ký là thứ đảm bảo nó không bị sửa.
+ *
+ * Đó chính là lời hứa của JWT, và là lý do nó đáng dùng cho access token: một
+ * phép kiểm mật mã học trong RAM, vài chục micro-giây, không đi mạng, không đi
+ * đĩa. Với một token đi kèm MỌI request thì khác biệt đó cộng dồn lại rất đáng
+ * kể — và nó còn có nghĩa là API vẫn kiểm được token kể cả khi database đang
+ * quá tải.
+ *
+ * Cái giá phải trả: token đã cấp thì không thu hồi được. Ta chấp nhận cái giá
+ * đó bằng cách cho access token sống ngắn, và bù lại bằng refresh token có tra
+ * database (xem `auth.service.ts`).
  */
 
 import { NextFunction, Request, Response } from "express";
-import { accessTokenVerifier } from "../lib/cognito";
-import { findUserBySub } from "../services/user.service";
+import { verifyAccessToken } from "../lib/jwt";
 import { AppError } from "../utils/AppError";
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
   /*
    * BƯỚC 1 — Lấy token ra khỏi header.
    *
    * Quy ước chuẩn (RFC 6750) là header có dạng:
-   *     Authorization: Bearer eyJraWQiOiJ...
+   *     Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
    *
    * "Bearer" nghĩa đen là "người mang" — bất kỳ ai CẦM được token này đều dùng
    * được nó, y như tờ tiền mặt. Không có bước nào kiểm tra xem người gửi có đúng
@@ -45,6 +60,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
    * Đó chính là lý do ở frontend ta cất token vào cookie `httpOnly`: cờ đó khiến
    * JavaScript trong trình duyệt KHÔNG đọc được cookie, nên kể cả khi trang web
    * dính mã độc (tấn công XSS), kẻ tấn công cũng không lấy được token ra.
+   *
+   * `?.` (optional chaining) xử lý gọn trường hợp header vắng mặt: nếu
+   * `req.headers.authorization` là `undefined` thì cả biểu thức thành
+   * `undefined` thay vì ném lỗi "cannot read property of undefined".
    */
   const header = req.headers.authorization;
 
@@ -55,6 +74,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
      * Lý do: để errorHandler là nơi DUY NHẤT định dạng response lỗi. Nhờ vậy mọi
      * lỗi trong ứng dụng đều có cùng một hình dạng `{ success: false, message }`,
      * và frontend chỉ cần viết một chỗ xử lý cho tất cả.
+     *
+     * Thử tưởng tượng phương án ngược lại: mỗi middleware và mỗi controller tự
+     * gọi `res.json` với định dạng riêng. Chỉ cần một chỗ quên trường `success`
+     * là frontend có một nhánh lỗi im lặng không ai ngờ tới.
      */
     return next(new AppError(401, "Bạn cần đăng nhập để thực hiện thao tác này."));
   }
@@ -64,98 +87,54 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   try {
     /*
-     * BƯỚC 2 — Kiểm token.
+     * BƯỚC 2 — Kiểm chữ ký và hạn của token.
      *
-     * Một dòng này làm rất nhiều việc (xem giải thích chi tiết ở lib/cognito.ts):
-     * kiểm chữ ký bằng khoá công khai của Cognito, kiểm hạn dùng, kiểm token do
-     * đúng user pool phát ra, kiểm đúng loại "access", kiểm đúng app client.
+     * Một dòng này làm hai việc, và cả hai đều bắt buộc:
+     *   - Tính lại chữ ký từ header + payload bằng `JWT_SECRET`, so với chữ ký
+     *     đi kèm. Khác nhau → token đã bị sửa hoặc do người khác ký → ném lỗi.
+     *   - So `exp` trong payload với đồng hồ hiện tại. Quá hạn → ném lỗi.
      *
-     * Lần gọi đầu tiên có đi tải bộ khoá công khai (JWKS) về, hơi chậm một chút.
-     * Từ lần thứ hai trở đi thư viện dùng bản đã cache trong bộ nhớ — không có
-     * request nào ra Internet nữa. Đó là lý do cách làm này chịu tải tốt.
+     * Nhắc lại cảnh báo ở `lib/jwt.ts`: đây phải là `verify`, tuyệt đối không
+     * phải `decode`. `decode` chỉ bóc base64 ra đọc mà không kiểm chữ ký, nên ai
+     * cũng tự chế được một token giả và đi thẳng vào tài khoản người khác.
      */
-    const claims = await accessTokenVerifier.verify(token);
+    const payload = verifyAccessToken(token);
 
     /*
-     * BƯỚC 3 — Đổi `sub` của Cognito lấy người dùng trong database của ta.
-     *
-     * Đây là bước MỚI, thêm vào khi dự án có bảng `User`. Trước kia `sub` được
-     * dùng thẳng làm `Todo.userId`, nên không cần bước này.
-     *
-     * Vì sao bây giờ phải tra thêm một lần?
-     *
-     *   Vì một con người có thể có TỚI HAI `sub`: một của tài khoản email + mật
-     *   khẩu, một của tài khoản Google. Access token chỉ nói cho ta biết "tài
-     *   khoản Cognito nào", còn câu hỏi ta thật sự cần trả lời là "CON NGƯỜI
-     *   nào". Bảng `User` là chỗ duy nhất biết hai `sub` đó là một người.
-     *
-     * ⚠️ ĐÁNH ĐỔI PHẢI THỪA NHẬN: dòng này thêm MỘT QUERY DATABASE vào MỌI
-     * request có xác thực.
-     *
-     *   Đắt tới mức nào? Một câu `SELECT` trên cột có chỉ mục UNIQUE, cùng máy,
-     *   thường dưới 1ms. So với việc app vốn đã phải query lấy danh sách todo
-     *   ngay sau đó, chi phí này gần như không đáng kể.
-     *
-     *   Khi nào thì đáng lo? Khi lưu lượng lớn. Lúc đó cách xử lý là cache ánh
-     *   xạ `sub → User.id` trong bộ nhớ (nó gần như không bao giờ đổi), hoặc
-     *   nhét `User.id` vào chính token bằng Pre-Token-Generation Lambda của
-     *   Cognito. Cả hai đều là tối ưu hoá nên làm KHI ĐO ĐƯỢC vấn đề, không phải
-     *   làm trước từ bây giờ.
-     */
-    const user = await findUserBySub(claims.sub);
-
-    if (!user) {
-      /*
-       * Token hợp lệ nhưng không có hàng User nào ứng với nó.
-       *
-       * Nghe như không thể xảy ra, nhưng có một tình huống rất thật: những access
-       * token được phát TRƯỚC khi bảng `User` tồn tại vẫn còn hiệu lực với Cognito
-       * thêm một giờ nữa. Người dùng đang mở tab sẵn sẽ rơi đúng vào đây.
-       *
-       * 401 là câu trả lời đúng: frontend thấy 401 thì đưa về trang đăng nhập,
-       * người dùng đăng nhập lại một lần, `findOrLinkUser` tạo hàng User, và mọi
-       * thứ trở lại bình thường. Tự động tạo hàng User ở đây thì KHÔNG làm được,
-       * vì access token không chứa email — mà thiếu email thì không gộp danh tính
-       * được (xem `user.service.ts`).
-       */
-      return next(new AppError(401, "Phiên đăng nhập không còn hợp lệ. Vui lòng đăng nhập lại."));
-    }
-
-    /*
-     * BƯỚC 4 — Gắn danh tính vào request.
+     * BƯỚC 3 — Gắn danh tính vào request.
      *
      * Từ đây trở đi, mọi controller phía sau đọc `req.user.id` là biết chắc chắn
-     * mình đang phục vụ ai. Giá trị đó bắt nguồn từ CHỮ KÝ CỦA COGNITO, không
-     * phải từ dữ liệu client tự khai — đó là toàn bộ điểm mấu chốt.
+     * mình đang phục vụ ai. Và đây là điểm mấu chốt về mặt bảo mật:
+     *
+     *     GIÁ TRỊ NÀY ĐẾN TỪ CHỮ KÝ, KHÔNG ĐẾN TỪ DỮ LIỆU CLIENT TỰ KHAI.
      *
      * Hãy hình dung phương án tệ: cho client gửi `userId` trong body request.
-     * Khi đó ai cũng có thể sửa một con số trong DevTools để đọc todo của người
-     * khác. Với `sub` lấy từ token đã ký, muốn giả mạo thì phải giả được chữ ký
-     * của AWS — điều mà mật mã học đảm bảo là bất khả thi.
+     * Khi đó ai cũng có thể sửa một giá trị trong DevTools để đọc todo của người
+     * khác — một lỗ hổng mà không dòng code nào phía sau cứu được.
      *
-     * Ta gắn cả ba giá trị, và mỗi cái một vai trò rõ ràng:
+     * Với `id` lấy từ token đã kiểm chữ ký, muốn giả mạo thì phải đoán được
+     * `JWT_SECRET`. Mật mã học đảm bảo điều đó là bất khả thi.
      *
-     *   id       — "CON NGƯỜI nào"  → dùng cho mọi query todo
-     *   sub      — "TÀI KHOẢN COGNITO nào" → giữ lại để ghi log, gỡ lỗi
-     *   username — tên đăng nhập thật trong Cognito
+     * Nguyên tắc rút ra, đáng mang theo suốt nghề: DANH TÍNH KHÔNG BAO GIỜ ĐƯỢC
+     * ĐẾN TỪ THAM SỐ DO CLIENT GỬI. Nó phải được server tự suy ra từ một thứ đã
+     * được kiểm chứng.
      */
-    req.user = {
-      id: user.id,
-      email: user.email,
-      sub: claims.sub,
-      username: String(claims.username ?? claims.sub),
-    };
+    req.user = { id: payload.id, email: payload.email };
 
     next();
   } catch {
     /*
-     * Verify thất bại có thể vì: token hết hạn, token bị sửa, token của user pool
-     * khác, hoặc chuỗi gửi lên chẳng phải JWT.
+     * Verify thất bại có thể vì: token hết hạn, token bị sửa, token ký bằng
+     * khoá khác, hoặc chuỗi gửi lên chẳng phải JWT.
      *
      * Ta cố ý gộp tất cả thành MỘT thông báo chung. Nói rõ "token hết hạn" hay
      * "chữ ký sai" chỉ giúp ích cho người đang dò tìm cách tấn công. Còn frontend
      * thì chỉ cần biết một điều: 401 nghĩa là đi làm mới token hoặc đá về trang
      * đăng nhập.
+     *
+     * Chú ý `catch` không có tham số — cú pháp hợp lệ từ ES2019, dùng khi bạn
+     * thật sự không cần tới đối tượng lỗi. Viết vậy nói rõ với người đọc rằng
+     * việc bỏ qua chi tiết lỗi ở đây là CHỦ Ý, không phải bỏ sót.
      */
     next(new AppError(401, "Phiên đăng nhập không hợp lệ hoặc đã hết hạn."));
   }

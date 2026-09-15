@@ -139,7 +139,7 @@ app.use(express.json());
  * Hai nhóm route, và sự khác nhau giữa chúng là điều đáng chú ý nhất ở file này:
  *
  *   /api/auth   — phần lớn CÔNG KHAI. Phải vậy, vì đây là những cánh cửa dành
- *                 cho người CHƯA có token: đăng ký, xác thực email, đăng nhập.
+ *                 cho người CHƯA có token: đăng ký, đăng nhập, gia hạn, đăng xuất.
  *
  *   /api/todos  — TOÀN BỘ cần token. Bên trong `todo.routes.ts` có một dòng
  *                 `router.use(requireAuth)` chắn ngang trước mọi route.

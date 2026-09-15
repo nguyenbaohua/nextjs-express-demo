@@ -86,8 +86,8 @@ import { AppError } from "../utils/AppError";
  * ----------------------------------------------------------------------------
  *
  * `req.user` do middleware `requireAuth` gắn vào, và giá trị của nó được đọc ra
- * từ CHỮ KÝ của access token Cognito. Đây là điểm khác biệt sống còn so với việc
- * đọc `req.body.userId`: client không thể tự bịa ra giá trị này.
+ * từ bên trong access token ĐÃ KIỂM CHỮ KÝ. Đây là điểm khác biệt sống còn so
+ * với việc đọc `req.body.userId`: client không thể tự bịa ra giá trị này.
  *
  * Vì sao phải viết hàm riêng thay vì dùng thẳng `req.user!.id` ở bảy chỗ?
  *
@@ -102,21 +102,23 @@ import { AppError } from "../utils/AppError";
  *   thứ nhất bị ai đó vô tình tháo mất.
  *
  * ----------------------------------------------------------------------------
- * ⚠️ ĐỌC `id` CHỨ KHÔNG PHẢI `sub` — CHỖ NÀY TỪNG LÀ `sub`
+ * VÌ SAO TRẢ VỀ 401 CHỨ KHÔNG PHẢI 500?
  * ----------------------------------------------------------------------------
  *
- * Khi dự án có thêm bảng `User`, dòng dưới đây đã đổi từ `req.user?.sub` sang
- * `req.user?.id`. Nhìn thì chỉ là ba ký tự, nhưng nó quyết định toàn bộ tính
- * năng gộp tài khoản:
+ * Nếu `req.user` vắng mặt, về mặt kỹ thuật thì đó là lỗi LẬP TRÌNH: ai đó đã
+ * quên gắn `requireAuth`. Theo đúng lý, lỗi của server thì phải là 500.
  *
- *   sub → "TÀI KHOẢN COGNITO nào". Một người đăng nhập bằng mật khẩu và bằng
- *         Google sẽ có HAI `sub` khác nhau.
- *   id  → "CON NGƯỜI nào". Luôn chỉ có một, kể cả khi có hai `sub`.
+ * Nhưng 401 mới là câu trả lời đúng ở đây, vì hai lẽ:
  *
- * Nếu quên sửa chỗ này, mọi thứ vẫn biên dịch được và vẫn chạy được — chỉ có
- * điều người dùng đăng nhập bằng Google sẽ thấy danh sách trống trơn, còn todo
- * họ tạo lúc đăng nhập bằng mật khẩu thì "biến mất". Đây đúng kiểu bug mà
- * TypeScript không cứu được, vì cả hai đều là `string`.
+ *   1. Với người dùng, hậu quả y hệt nhau: họ không được vào. 401 hướng dẫn họ
+ *      làm điều hữu ích (đăng nhập lại), còn 500 chỉ khiến họ hoang mang.
+ *
+ *   2. 500 thường kèm theo việc ghi log ở mức nghiêm trọng và báo động cho đội
+ *      trực. Một route thiếu `requireAuth` thì đáng sửa, nhưng nó không phải sự
+ *      cố cần đánh thức ai lúc 3 giờ sáng.
+ *
+ * Nguyên tắc: chọn mã status theo THỨ NGƯỜI GỌI CẦN LÀM TIẾP, không phải theo
+ * cách phân loại lỗi trong đầu bạn.
  */
 function getUserId(req: Request): string {
   const userId = req.user?.id;

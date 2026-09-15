@@ -1,73 +1,60 @@
-# Todo List — Frontend
+# Frontend — Next.js 16 (App Router)
 
-Giao diện web cho API todo ở [`../backend`](../backend), viết bằng Next.js 16 (App Router) + TypeScript + CSS Modules.
+Giao diện của ứng dụng todo-list. Nó **không** nói chuyện trực tiếp với database:
+mọi dữ liệu đều đi qua backend Express ở thư mục `../backend`.
 
-## Yêu cầu
-
-Backend phải chạy trước, vì mọi dữ liệu đều lấy từ đó. Xem hướng dẫn ở `../backend`.
-
-## Chạy dự án
+## Chạy
 
 ```bash
-cp .env.example .env.local   # chỉnh lại nếu backend không chạy ở cổng 3000
+cp .env.example .env.local
 npm install
-npm run dev
+npm run dev          # http://localhost:3001
 ```
 
-Mở http://localhost:3001
+Backend phải chạy trước, nếu không mọi trang sẽ hiện lỗi *"Không kết nối được tới
+server"*. Xem [docs/01-cai-dat-va-chay.md](../docs/01-cai-dat-va-chay.md).
 
-> Frontend dùng cổng **3001** vì backend đã giữ cổng 3000.
+## Lệnh
+
+| Lệnh | Việc |
+|---|---|
+| `npm run dev` | Server phát triển, cổng 3001 |
+| `npm run build` | Build production (kèm typecheck) |
+| `npm start` | Chạy bản đã build |
+| `npm run lint` | ESLint |
+
+Chạy `npm run build` một lần là đáng, chỉ để xem bảng route và đối chiếu dấu
+`ƒ` (Dynamic) / `○` (Static) với những gì bạn viết trong code.
 
 ## Biến môi trường
 
-| Biến | Mặc định | Mô tả |
-| --- | --- | --- |
-| `API_BASE_URL` | `http://localhost:3000/api` | Base URL của backend. Chỉ đọc ở phía server nên không lộ ra browser. |
+```bash
+API_BASE_URL=http://localhost:3000/api
+```
 
-## Các trang
-
-| Đường dẫn | Chức năng |
-| --- | --- |
-| `/` | Danh sách task, tách nhóm chưa xong / đã xong. Thêm task, tick hoàn thành, xóa. |
-| `/todos/[id]` | Chi tiết task: sửa nội dung, đổi trạng thái, xóa, xem ngày tạo / cập nhật. |
+Chỉ một biến, và nó cố tình **không** có tiền tố `NEXT_PUBLIC_`. Next.js chỉ gửi
+xuống trình duyệt những biến có tiền tố đó — nên địa chỉ backend chỉ tồn tại phía
+server và không bao giờ lộ ra ngoài.
 
 ## Cấu trúc
 
 ```
 src/
-├── app/
-│   ├── layout.tsx           Root layout, font, metadata
-│   ├── globals.css          Design token (sáng / tối) + reset
-│   ├── page.tsx             Trang danh sách
-│   └── todos/[id]/          Trang chi tiết + not-found
-├── components/              Component UI, mỗi cái kèm *.module.css
-└── lib/
-    ├── api.ts               Gọi backend (server-side), bóc envelope { success, data }
-    ├── actions.ts           Server Actions + revalidatePath
-    ├── types.ts             Kiểu dữ liệu khớp với backend
-    ├── constants.ts         Route helper, giá trị mặc định
-    └── format.ts            Format ngày giờ vi-VN
+├── app/         CHỈ routing (page, layout, loading, not-found)
+├── features/    nghiệp vụ: auth/, todos/
+├── shared/      hạ tầng dùng chung: api/, lib/, config/, types/, components/
+└── proxy.ts     chặn cửa + tự động gia hạn token
 ```
 
-## Luồng dữ liệu
+Luật quan trọng nhất: **`features/` được import từ `shared/`, nhưng `shared/`
+không bao giờ import từ `features/`.** Lý do và cách quyết định một file nên nằm
+đâu: [docs/04-cau-truc-thu-muc.md](../docs/04-cau-truc-thu-muc.md).
 
-```mermaid
-flowchart LR
-    P["Server Component<br/>(page.tsx)"] -->|"đọc"| A["lib/api.ts"]
-    C["Client Component<br/>(form, nút bấm)"] -->|"gọi"| S["lib/actions.ts<br/>Server Action"]
-    S -->|"ghi"| A
-    A -->|"fetch no-store"| B["Backend Express<br/>/api/todos"]
-    B --> DB[("PostgreSQL")]
-    S -.->|"revalidatePath"| P
-```
+## Học
 
-Mọi request đều dùng `cache: "no-store"` để luôn lấy dữ liệu mới nhất; sau mỗi lần ghi, Server Action gọi `revalidatePath` để render lại trang liên quan.
+- **[LEARN.md](LEARN.md)** — Server Component vs Client Component, Server Action,
+  cache, cookie `httpOnly`, và thứ tự nên đọc code.
+- **[../docs/](../docs/README.md)** — bộ tài liệu đầy đủ cho cả hai phía.
 
-## Lệnh
-
-| Lệnh | Tác dụng |
-| --- | --- |
-| `npm run dev` | Chạy dev server ở cổng 3001 |
-| `npm run build` | Build production |
-| `npm start` | Chạy bản build ở cổng 3001 |
-| `npm run lint` | ESLint |
+Mọi file trong `src/` đều có comment giải thích không chỉ "làm gì" mà cả "vì sao
+làm vậy" và "làm cách khác thì hỏng thế nào".

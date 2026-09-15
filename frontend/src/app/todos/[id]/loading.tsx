@@ -16,7 +16,7 @@
  * trắng nào.
  */
 
-import styles from "@/components/Skeleton.module.css";
+import styles from "@/shared/components/Skeleton.module.css";
 
 export default function TodoDetailLoading() {
   return (

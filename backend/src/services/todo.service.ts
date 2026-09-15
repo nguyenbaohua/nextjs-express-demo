@@ -72,12 +72,9 @@ function notFoundError(id: number) {
  * `userId` trong mệnh đề `where`. Không có ngoại lệ.
  *
  * `userId` này là `User.id` trong database của ta, do middleware `requireAuth`
- * tra ra từ `sub` mà nó đọc được TỪ CHỮ KÝ của token Cognito. Client không tự
- * khai được nó.
- *
- * (Trước khi dự án có bảng `User`, giá trị này là `sub` của Cognito. Đã đổi khi
- * thêm tính năng gộp tài khoản — vì một người có thể có hai `sub` nhưng chỉ có
- * một `User.id`. Xem `services/user.service.ts`.)
+ * đọc ra từ bên trong access token ĐÃ KIỂM CHỮ KÝ. Client không tự khai được nó
+ * — muốn giả mạo thì phải đoán được `JWT_SECRET`, điều mà mật mã học đảm bảo là
+ * bất khả thi.
  *
  * Vì sao phải nhấn mạnh đến thế? Vì đây chính xác là chỗ mà lỗ hổng bảo mật phổ
  * biến nhất thế giới web sinh ra. Nó có tên riêng: IDOR — *Insecure Direct

@@ -91,7 +91,7 @@ const router = Router();
  *   Nguyên tắc rút ra: hãy làm cho lựa chọn AN TOÀN trở thành mặc định, và lựa
  *   chọn nguy hiểm phải tốn công mới làm được.
  *
- * Từ đây trở đi, mọi controller phía sau đọc được `req.user.sub` và dùng nó để
+ * Từ đây trở đi, mọi controller phía sau đọc được `req.user.id` và dùng nó để
  * chỉ đụng tới todo của đúng người đang gọi.
  */
 router.use(requireAuth);

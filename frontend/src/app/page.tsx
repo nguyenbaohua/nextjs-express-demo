@@ -43,19 +43,19 @@
  * trình duyệt, nên URL backend và logic bên trong đều được giấu kín.
  */
 
-import AddTodoForm from "@/components/AddTodoForm";
-import TodoItem from "@/components/TodoItem";
-import UserMenu from "@/components/UserMenu";
-import { getTodos } from "@/lib/api";
-import { getSessionUser } from "@/lib/auth";
-import type { Todo } from "@/lib/types";
+import AddTodoForm from "@/features/todos/components/AddTodoForm";
+import TodoItem from "@/features/todos/components/TodoItem";
+import UserMenu from "@/features/auth/components/UserMenu";
+import { getTodos } from "@/features/todos/api";
+import { getSessionUser } from "@/shared/lib/session";
+import type { Todo } from "@/features/todos/types";
 import styles from "./page.module.css";
 
 /*
  * Ghi chú về đường dẫn import:
  *
  * `@/` là bí danh trỏ tới thư mục `src/`, khai báo trong `tsconfig.json` (mục
- * `paths`). Nhờ nó ta viết `@/components/TodoItem` thay vì đếm dấu chấm kiểu
+ * `paths`). Nhờ nó ta viết `@/features/todos/components/TodoItem` thay vì đếm dấu chấm kiểu
  * `../../components/TodoItem`.
  *
  * Còn `./page.module.css` là CSS MODULE. Đuôi `.module.css` khiến Next.js tự

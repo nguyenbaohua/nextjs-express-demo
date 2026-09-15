@@ -27,11 +27,12 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import EditTodoForm from "@/components/EditTodoForm";
-import TodoDetailActions from "@/components/TodoDetailActions";
-import { ApiError, getTodoById } from "@/lib/api";
-import { ROUTES } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format";
+import EditTodoForm from "@/features/todos/components/EditTodoForm";
+import TodoDetailActions from "@/features/todos/components/TodoDetailActions";
+import { ApiError } from "@/shared/api/http";
+import { getTodoById } from "@/features/todos/api";
+import { ROUTES } from "@/shared/config/constants";
+import { formatDateTime } from "@/shared/lib/format";
 import styles from "./page.module.css";
 
 /**

@@ -34,7 +34,7 @@
  * thời gian thật không đổi.
  */
 
-import styles from "@/components/Skeleton.module.css";
+import styles from "@/shared/components/Skeleton.module.css";
 
 export default function TodoListLoading() {
   return (

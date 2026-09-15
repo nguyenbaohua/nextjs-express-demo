@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Env files — may contain secrets. Only the example is committed.
+.env
+.env.*
+!.env.example
+
+# Keys and certificates
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Caches / editor temp files
+*.tsbuildinfo
+.DS_Store
+*.swp

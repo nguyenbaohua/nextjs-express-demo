@@ -1,3 +1,20 @@
+# ---------------------------------------------------------------------------
+# Postgres for local development.
+#
+# `name` sets the Compose project name — the prefix Docker puts on the container
+# ("nextjs-express-demo-db-1") and on the volume ("nextjs-express-demo_db_data").
+# Without it, Compose falls back to the directory name, which would just be
+# "backend" — indistinguishable from every other project's backend folder on the
+# same machine.
+#
+# Usage:
+#   docker compose up -d      start
+#   docker compose ps         status
+#   docker compose stop       stop, keep data
+#   docker compose down -v    stop and DELETE all data
+# ---------------------------------------------------------------------------
+name: nextjs-express-demo
+
 services:
   db:
     image: postgres:16-alpine
@@ -10,6 +27,13 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Lets `docker compose up --wait` (and other services) know when Postgres is
+    # actually ready to accept connections, not just when the container started.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-todo_list_node_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   db_data:
